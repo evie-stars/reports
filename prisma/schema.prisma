@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Device {
+  desktop
+  mobile
+}
+
+enum SearchType {
+  organic
+  local_finder
+  maps
+}
+
+enum RankRunStatus {
+  queued
+  running
+  completed
+  failed
+  blocked
+}
+
+enum RankDirection {
+  up
+  down
+  unchanged
+  new
+  lost
+}
+
+model Client {
+  id        String    @id @default(cuid())
+  name      String
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+}
+
+model Project {
+  id                 String       @id @default(cuid())
+  clientId           String
+  name               String
+  domain             String
+  targetBusinessName String?
+  serviceArea        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  client             Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  keywords           Keyword[]
+  locations          Location[]
+  competitors        Competitor[]
+  rankRuns           RankRun[]
+
+  @@index([clientId])
+}
+
+model Keyword {
+  id        String       @id @default(cuid())
+  projectId String
+  phrase    String
+  group     String?
+  targetUrl String?
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  results   RankResult[]
+
+  @@index([projectId, active])
+}
+
+model Location {
+  id          String       @id @default(cuid())
+  projectId   String
+  name        String
+  countryCode String       @default("GB")
+  latitude    Float?
+  longitude   Float?
+  radiusMeters Int?
+  dataForSeoLocationName String?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  results     RankResult[]
+
+  @@index([projectId, active])
+}
+
+model Competitor {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  domain    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, name])
+}
+
+model RankRun {
+  id             String        @id @default(cuid())
+  projectId      String
+  status         RankRunStatus @default(queued)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  sandbox        Boolean       @default(true)
+  requestedTasks Int           @default(0)
+  actualCostUsd  Decimal       @default(0) @db.Decimal(10, 6)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  apiRequests    ApiRequest[]
+  results        RankResult[]
+
+  @@index([projectId, createdAt])
+}
+
+model RankResult {
+  id              String         @id @default(cuid())
+  runId           String
+  keywordId       String
+  locationId      String
+  searchType      SearchType
+  device          Device
+  rankGroup       Int?
+  rankAbsolute    Int?
+  matched         Boolean        @default(false)
+  matchedName     String?
+  matchedUrl      String?
+  resultTitle     String?
+  resultUrl       String?
+  resultDomain    String?
+  direction       RankDirection?
+  previousRank    Int?
+  checkedAt       DateTime       @default(now())
+  rawItem         Json?
+  run             RankRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  keyword         Keyword        @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  location        Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  serpFeatures    SerpFeature[]
+
+  @@index([keywordId, locationId, searchType, device, checkedAt])
+  @@index([runId])
+}
+
+model SerpFeature {
+  id           String     @id @default(cuid())
+  rankResultId String
+  type         String
+  title        String?
+  url          String?
+  rankGroup    Int?
+  rankAbsolute Int?
+  rawItem      Json?
+  rankResult   RankResult @relation(fields: [rankResultId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+}
+
+model ApiRequest {
+  id           String   @id @default(cuid())
+  rankRunId    String?
+  provider     String   @default("dataforseo")
+  endpoint     String
+  tag          String?
+  sandbox      Boolean  @default(true)
+  requestBody  Json
+  responseBody Json?
+  statusCode   Int?
+  costUsd      Decimal  @default(0) @db.Decimal(10, 6)
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  rankRun      RankRun? @relation(fields: [rankRunId], references: [id], onDelete: SetNull)
+
+  @@index([provider, createdAt])
+}
+
+model GscSnapshot {
+  id         String   @id @default(cuid())
+  projectId String
+  date       DateTime
+  query      String?
+  page       String?
+  clicks     Int      @default(0)
+  impressions Int     @default(0)
+  ctr        Float?
+  position   Float?
+  rawData    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, date])
+}
+
+model Ga4Snapshot {
+  id         String   @id @default(cuid())
+  projectId String
+  date       DateTime
+  source     String?
+  medium     String?
+  landingPage String?
+  sessions   Int      @default(0)
+  users      Int      @default(0)
+  conversions Float   @default(0)
+  rawData    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, date])
+}
