@@ -43,8 +43,7 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 ## Plesk Setup Outline
 
 1. Create a Node.js app in Plesk pointing at this project directory.
-2. Set the application startup file to Next's standalone server after build:
-   `server.js` inside `.next/standalone`.
+2. Set the application startup file to `server.js`.
 3. Add the environment variables from `.env.example` in Plesk.
 4. Create the database in Plesk and use the connection string as `DATABASE_URL`.
 5. Run:

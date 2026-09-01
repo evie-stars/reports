@@ -3,7 +3,7 @@ import nextTypescript from "eslint-config-next/typescript";
 
 const ignores = [
   {
-    ignores: [".next/**", "node_modules/**", "next-env.d.ts"]
+    ignores: [".next/**", "node_modules/**", "next-env.d.ts", "server.js"]
   }
 ];
 
