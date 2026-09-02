@@ -2,11 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   createKeywords,
-  createLocation,
   updateKeywordActive,
   updateLocationActive,
   updateProject
 } from "@/app/actions";
+import { AreaPickerForm } from "@/components/area-picker-form";
 import { Icon } from "@/components/icon";
 import { LiveRunForm } from "@/components/live-run-form";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
@@ -49,8 +49,9 @@ export default async function ProjectDetailPage({
             <Link href="/clients">Clients</Link> / <Link href={`/clients/${project.client.id}`}>{project.client.name}</Link> / {project.name}
           </p>
           <h2>{project.name}</h2>
-          <p>{project.domain} {project.serviceArea ? `- ${project.serviceArea}` : ""}</p>
+          <p>Tracking settings for {project.domain}{project.serviceArea ? ` - ${project.serviceArea}` : ""}</p>
         </div>
+        <Link className="button button-secondary" href={`/clients/${project.client.id}`}>View Report</Link>
       </header>
 
       {sandboxError ? <div className="notice danger-notice"><strong>Sandbox check not started.</strong> {sandboxError}</div> : null}
@@ -132,37 +133,7 @@ export default async function ProjectDetailPage({
           <button className="button" type="submit">Add Keywords</button>
         </form>
 
-        <form className="card form" action={createLocation}>
-          <p className="label label-with-icon"><Icon name="location" />Add Location</p>
-          <input type="hidden" name="projectId" value={project.id} />
-          <label>
-            Location name
-            <input name="name" required placeholder="Manchester" />
-          </label>
-          <label>
-            Country code
-            <input name="countryCode" required maxLength={2} defaultValue="GB" />
-          </label>
-          <label>
-            DataForSEO location name
-            <input name="dataForSeoLocationName" placeholder="Manchester,England,United Kingdom" />
-          </label>
-          <div className="form-row">
-            <label>
-              Latitude
-              <input name="latitude" inputMode="decimal" placeholder="53.4808" />
-            </label>
-            <label>
-              Longitude
-              <input name="longitude" inputMode="decimal" placeholder="-2.2426" />
-            </label>
-          </div>
-          <label>
-            Radius metres
-            <input name="radiusMeters" inputMode="numeric" placeholder="5000" />
-          </label>
-          <button className="button" type="submit">Add Location</button>
-        </form>
+        <AreaPickerForm projectId={project.id} />
       </section>
 
       <section className="grid two" style={{ marginTop: 18 }}>

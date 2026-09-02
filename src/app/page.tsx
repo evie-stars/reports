@@ -1,35 +1,31 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
-import { Icon } from "@/components/icon";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const data = await getDashboardData();
-  const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
-
   return (
     <>
       <header className="page-header">
         <div>
           <h2>Dashboard</h2>
-          <p>Track local rankings by keyword, location, device, and result type. Every run is stored as a dated snapshot for monthly comparison.</p>
+          <p>A quick view of reporting activity across all clients.</p>
         </div>
-        <Link className="button" href="/clients">Add Tracking Data</Link>
+        <Link className="button" href="/clients">View Clients</Link>
       </header>
 
       {data.dbUnavailable ? <SetupNotice /> : null}
 
-      <section className="grid metrics">
-        <Metric icon="contacts" label="Clients" value={data.clients} hint="Accounts being tracked" />
-        <Metric icon="home" label="Projects" value={data.projects} hint="Sites or locations" />
-        <Metric icon="tags" label="Active Keywords" value={data.keywords} hint="Included in checks" />
-        <Metric icon="location" label="Tracked Locations" value={data.locations} hint="Local SERP markets" />
+      <section className="summary-strip" aria-label="Reporting summary">
+        <SummaryItem label="Clients" value={data.clients} />
+        <SummaryItem label="Reports" value={data.projects} />
+        <SummaryItem label="Active Keywords" value={data.keywords} />
+        <SummaryItem label="Areas" value={data.locations} />
       </section>
 
-      <section className="grid two" style={{ marginTop: 18 }}>
-        <div className="card">
-          <p className="label">Recent Rank Runs</p>
+      <section className="card spaced-section">
+          <p className="label">Recent Checks</p>
           <table className="table">
             <thead>
               <tr>
@@ -50,27 +46,11 @@ export default async function DashboardPage() {
               ))}
               {data.runs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="muted">No rank runs yet. Seed data, then run the sandbox cron script.</td>
+                  <td colSpan={4} className="muted">No rank checks have been stored yet.</td>
                 </tr>
               ) : null}
             </tbody>
           </table>
-        </div>
-
-        <div className="card">
-          <p className="label">DataForSEO Guardrails</p>
-          <h3>Sandbox first</h3>
-          <p className="muted">
-            {liveEnabled
-              ? "Live API access is enabled, with the project interface restricted to one explicitly confirmed task."
-              : "Live API calls are blocked. Sandbox checks remain free while the integration is being verified."}
-          </p>
-          <div className="check-list">
-            <span>Sandbox mode enabled by default</span>
-            <span>Live verification capped to one task</span>
-            <span>API requests logged with project tags</span>
-          </div>
-        </div>
       </section>
     </>
   );
@@ -105,15 +85,6 @@ function SetupNotice() {
   );
 }
 
-function Metric({ icon, label, value, hint }: { icon: "contacts" | "home" | "location" | "tags"; label: string; value: number; hint: string }) {
-  return (
-    <div className="card metric-card">
-      <div className="metric-topline">
-        <p className="label">{label}</p>
-        <span className="icon-tile"><Icon name={icon} /></span>
-      </div>
-      <p className="metric-value">{value}</p>
-      <p className="metric-hint">{hint}</p>
-    </div>
-  );
+function SummaryItem({ label, value }: { label: string; value: number }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
 }

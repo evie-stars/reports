@@ -27,6 +27,15 @@ export type DataForSeoTask = {
 
 export type DataForSeoMode = "sandbox" | "live";
 
+export type DataForSeoLocation = {
+  locationCode: number;
+  locationName: string;
+  countryIsoCode: string;
+  locationType: string;
+};
+
+const locationCache = new Map<string, { expiresAt: number; locations: DataForSeoLocation[] }>();
+
 export class DataForSeoClient {
   private readonly login?: string;
   private readonly password?: string;
@@ -75,6 +84,41 @@ export class DataForSeoClient {
     };
   }
 
+  async getGoogleLocations(countryCode = "gb") {
+    if (!this.login || !this.password) {
+      throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
+    }
+
+    const country = countryCode.trim().toLowerCase();
+    const cached = locationCache.get(country);
+    if (cached && cached.expiresAt > Date.now()) return cached.locations;
+
+    const response = await fetch(`https://api.dataforseo.com/v3/serp/google/locations/${country}`, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
+        "Content-Type": "application/json"
+      },
+      cache: "no-store"
+    });
+    const body = await response.json();
+
+    if (!response.ok) {
+      throw new Error(`Unable to load DataForSEO locations (HTTP ${response.status}).`);
+    }
+
+    const locations = readLocations(body);
+    if (locations.length === 0) {
+      throw new Error("DataForSEO returned no supported locations for this country.");
+    }
+
+    locationCache.set(country, {
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      locations
+    });
+
+    return locations;
+  }
+
   assertSafeToRun(mode: DataForSeoMode, taskCount: number) {
     if (mode === "live" && !this.liveEnabled) {
       throw new Error("Live DataForSEO calls are blocked. Set DATAFORSEO_LIVE_ENABLED=true to allow a guarded live run.");
@@ -84,6 +128,38 @@ export class DataForSeoClient {
       throw new Error(`Live run blocked: ${taskCount} tasks exceeds DATAFORSEO_MAX_LIVE_TASKS_PER_RUN=${this.maxLiveTasks}.`);
     }
   }
+}
+
+function readLocations(body: unknown): DataForSeoLocation[] {
+  if (!body || typeof body !== "object") return [];
+  const tasks = (body as { tasks?: unknown }).tasks;
+  if (!Array.isArray(tasks)) return [];
+
+  return tasks.flatMap((task) => {
+    if (!task || typeof task !== "object") return [];
+    const result = (task as { result?: unknown }).result;
+    if (!Array.isArray(result)) return [];
+
+    return result.flatMap((location) => {
+      if (!location || typeof location !== "object") return [];
+      const item = location as Record<string, unknown>;
+      if (
+        typeof item.location_code !== "number" ||
+        typeof item.location_name !== "string" ||
+        typeof item.country_iso_code !== "string" ||
+        typeof item.location_type !== "string"
+      ) {
+        return [];
+      }
+
+      return [{
+        locationCode: item.location_code,
+        locationName: item.location_name,
+        countryIsoCode: item.country_iso_code,
+        locationType: item.location_type
+      }];
+    });
+  });
 }
 
 function readCost(body: unknown) {

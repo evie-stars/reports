@@ -44,11 +44,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
         </div>
       ) : null}
 
-      <section className="grid metrics run-metrics">
-        <RunMetric label="Requested Tasks" value={run.requestedTasks.toString()} />
-        <RunMetric label="Stored Results" value={run.results.length.toString()} />
-        <RunMetric label="Rank Matches" value={matchedResults.toString()} />
-        <RunMetric label="Actual Cost" value={`$${run.actualCostUsd.toString()}`} />
+      <section className="summary-strip" aria-label="Run summary">
+        <RunMetric label="Requested" value={run.requestedTasks.toString()} />
+        <RunMetric label="Results" value={run.results.length.toString()} />
+        <RunMetric label="Matches" value={matchedResults.toString()} />
+        <RunMetric label="Cost" value={`$${run.actualCostUsd.toString()}`} />
       </section>
 
       <section className="card" style={{ marginTop: 18 }}>
@@ -143,12 +143,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
 }
 
 function RunMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card metric-card compact-metric">
-      <p className="label">{label}</p>
-      <p className="metric-value">{value}</p>
-    </div>
-  );
+  return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function Movement({ direction, previousRank }: { direction: string | null; previousRank: number | null }) {

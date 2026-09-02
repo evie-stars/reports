@@ -1,11 +1,17 @@
-import { prisma } from "@/lib/db";
 import Link from "next/link";
 import { createClient } from "@/app/actions";
+import { ClientTable } from "@/components/client-table";
 import { Icon } from "@/components/icon";
+import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ new?: string }>;
+}) {
+  const { new: showNewClient } = await searchParams;
   const { clients, dbUnavailable } = await getClientsData();
 
   return (
@@ -13,8 +19,11 @@ export default async function ClientsPage() {
       <header className="page-header">
         <div>
           <h2>Clients</h2>
-          <p>Client and project setup for local SEO tracking.</p>
+          <p>Open a client to view their latest report.</p>
         </div>
+        <Link className="button" href={showNewClient ? "/clients" : "/clients?new=1"}>
+          {showNewClient ? "Close" : "Add Client"}
+        </Link>
       </header>
 
       {dbUnavailable ? (
@@ -24,54 +33,25 @@ export default async function ClientsPage() {
         </div>
       ) : null}
 
-      <section className="grid two">
-        <form className="card form" action={createClient}>
+      {showNewClient ? (
+        <form className="card form compact-create-form" action={createClient}>
           <p className="label label-with-icon"><Icon name="contacts" />New Client</p>
-          <label>
-            Client name
-            <input name="name" required placeholder="Star Websites" />
-          </label>
-          <label>
-            Notes
-            <textarea name="notes" rows={4} placeholder="Internal notes, billing context, reporting preferences" />
-          </label>
+          <div className="form-row client-create-fields">
+            <label>
+              Client name
+              <input name="name" required placeholder="Star Websites" />
+            </label>
+            <label>
+              Notes
+              <input name="notes" placeholder="Optional internal notes" />
+            </label>
+          </div>
           <button className="button" type="submit">Create Client</button>
         </form>
+      ) : null}
 
-        <div className="card">
-          <p className="label label-with-icon"><Icon name="graph" />Setup Flow</p>
-          <h3>Client, project, keywords, locations</h3>
-          <p className="muted">Create a client first, then add one or more projects. Each project gets its own tracked keywords and search locations.</p>
-        </div>
-      </section>
-
-      <section className="grid" style={{ marginTop: 18 }}>
-        {clients.map((client) => (
-          <article className="card" key={client.id}>
-            <p className="label">{client.projects.length} Projects</p>
-            <h3><Link href={`/clients/${client.id}`}>{client.name}</Link></h3>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Domain</th>
-                  <th>Keywords</th>
-                  <th>Locations</th>
-                </tr>
-              </thead>
-              <tbody>
-                {client.projects.map((project) => (
-                  <tr key={project.id}>
-                    <td><Link href={`/projects/${project.id}`}>{project.name}</Link></td>
-                    <td>{project.domain}</td>
-                    <td>{project.keywords.length}</td>
-                    <td>{project.locations.length}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </article>
-        ))}
+      <section className={`card client-table-card${showNewClient ? " spaced-section" : ""}`}>
+        <ClientTable clients={clients} />
       </section>
     </>
   );
@@ -79,16 +59,37 @@ export default async function ClientsPage() {
 
 async function getClientsData() {
   try {
-    const clients = await prisma.client.findMany({
+    const records = await prisma.client.findMany({
       orderBy: { name: "asc" },
       include: {
         projects: {
           include: {
-            keywords: true,
-            locations: true
+            keywords: { where: { active: true }, select: { id: true } },
+            locations: { where: { active: true }, select: { id: true } },
+            rankRuns: {
+              where: { sandbox: false, status: "completed" },
+              orderBy: { completedAt: "desc" },
+              take: 1,
+              select: { completedAt: true, createdAt: true }
+            }
           }
         }
       }
+    });
+
+    const clients = records.map((client) => {
+      const latestRun = client.projects
+        .flatMap((project) => project.rankRuns)
+        .sort((a, b) => (b.completedAt ?? b.createdAt).getTime() - (a.completedAt ?? a.createdAt).getTime())[0];
+
+      return {
+        id: client.id,
+        name: client.name,
+        projectCount: client.projects.length,
+        keywordCount: client.projects.reduce((total, project) => total + project.keywords.length, 0),
+        areaCount: client.projects.reduce((total, project) => total + project.locations.length, 0),
+        lastReport: latestRun ? (latestRun.completedAt ?? latestRun.createdAt).toLocaleDateString("en-GB") : null
+      };
     });
 
     return { clients, dbUnavailable: false };

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { executeLiveRankRun, executeSandboxRankRun } from "@/lib/rank-runner";
 
@@ -35,26 +36,10 @@ const bulkKeywordSchema = z.object({
   targetUrl: optionalText
 });
 
-const optionalNumber = z.preprocess((value) => {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text) return undefined;
-  return Number(text);
-}, z.number().finite().optional());
-
-const optionalInteger = z.preprocess((value) => {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text) return undefined;
-  return Number(text);
-}, z.number().int().optional());
-
 const locationSchema = z.object({
   projectId: z.string().trim().min(1),
-  name: z.string().trim().min(1, "Location name is required."),
   countryCode: z.string().trim().min(2).max(2).default("GB"),
-  dataForSeoLocationName: optionalText,
-  latitude: optionalNumber,
-  longitude: optionalNumber,
-  radiusMeters: optionalInteger
+  dataForSeoLocationName: z.string().trim().min(1, "Select an area from the DataForSEO list.")
 });
 
 const sandboxRunSchema = z.object({
@@ -80,7 +65,7 @@ export async function createClient(formData: FormData) {
   const client = await prisma.client.create({ data });
 
   revalidatePath("/clients");
-  redirect(`/clients/${client.id}`);
+  redirect(`/clients/${client.id}?view=settings`);
 }
 
 export async function updateClient(clientId: string, formData: FormData) {
@@ -137,25 +122,35 @@ export async function updateKeywordActive(keywordId: string, projectId: string, 
 }
 
 export async function createLocation(formData: FormData) {
-  const data = locationSchema.parse(readForm(formData, [
-    "projectId",
-    "name",
-    "countryCode",
-    "dataForSeoLocationName",
-    "latitude",
-    "longitude",
-    "radiusMeters"
-  ]));
+  const data = locationSchema.parse(readForm(formData, ["projectId", "countryCode", "dataForSeoLocationName"]));
+  const supportedAreas = await new DataForSeoClient().getGoogleLocations(data.countryCode);
+  const area = supportedAreas.find((location) => location.locationName === data.dataForSeoLocationName);
+
+  if (!area) {
+    throw new Error("That area is not in DataForSEO's current supported locations list.");
+  }
+
+  const existing = await prisma.location.findFirst({
+    where: {
+      projectId: data.projectId,
+      dataForSeoLocationName: area.locationName
+    }
+  });
+
+  if (existing) {
+    if (!existing.active) {
+      await prisma.location.update({ where: { id: existing.id }, data: { active: true } });
+    }
+    revalidatePath(`/projects/${data.projectId}`);
+    return;
+  }
 
   await prisma.location.create({
     data: {
       projectId: data.projectId,
-      name: data.name,
-      countryCode: data.countryCode.toUpperCase(),
-      dataForSeoLocationName: data.dataForSeoLocationName,
-      latitude: data.latitude,
-      longitude: data.longitude,
-      radiusMeters: data.radiusMeters
+      name: area.locationName.split(",")[0],
+      countryCode: area.countryIsoCode,
+      dataForSeoLocationName: area.locationName
     }
   });
   revalidatePath(`/projects/${data.projectId}`);
