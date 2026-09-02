@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { Icon } from "@/components/icon";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,8 @@ export default async function RunsPage() {
           <tbody>
             {runs.map((run) => (
               <tr key={run.id}>
-                <td>{run.createdAt.toLocaleDateString("en-GB")}</td>
-                <td>{run.project.client.name} / {run.project.name}</td>
+                <td><Link href={`/runs/${run.id}`}>{run.createdAt.toLocaleDateString("en-GB")}</Link></td>
+                <td><Link href={`/projects/${run.project.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
                 <td><span className="status">{run.status}</span></td>
                 <td>{run.sandbox ? "Sandbox" : "Live"}</td>
                 <td>{run.results.length}</td>

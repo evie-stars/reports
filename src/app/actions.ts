@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { executeSandboxRankRun } from "@/lib/rank-runner";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
 
@@ -54,6 +55,14 @@ const locationSchema = z.object({
   latitude: optionalNumber,
   longitude: optionalNumber,
   radiusMeters: optionalInteger
+});
+
+const sandboxRunSchema = z.object({
+  projectId: z.string().trim().min(1),
+  keywordIds: z.array(z.string().trim().min(1)).transform(uniqueValues),
+  locationIds: z.array(z.string().trim().min(1)).transform(uniqueValues),
+  devices: z.array(z.enum(["desktop", "mobile"])).transform(uniqueValues),
+  searchTypes: z.array(z.enum(["organic", "local_finder", "maps"])).transform(uniqueValues)
 });
 
 export async function createClient(formData: FormData) {
@@ -147,12 +156,43 @@ export async function updateLocationActive(locationId: string, projectId: string
   revalidatePath(`/projects/${projectId}`);
 }
 
+export async function runSandboxCheck(projectId: string, formData: FormData) {
+  let runId: string;
+
+  try {
+    const selection = sandboxRunSchema.parse({
+      projectId,
+      keywordIds: stringListFromForm(formData, "keywordIds"),
+      locationIds: stringListFromForm(formData, "locationIds"),
+      devices: stringListFromForm(formData, "devices"),
+      searchTypes: stringListFromForm(formData, "searchTypes")
+    });
+    runId = await executeSandboxRankRun(selection);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to start the sandbox check.";
+    redirect(`/projects/${projectId}?sandboxError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/runs");
+  revalidatePath(`/projects/${projectId}`);
+  redirect(`/runs/${runId}`);
+}
+
 function readForm(formData: FormData, keys: string[]) {
   return Object.fromEntries(keys.map((key) => [key, stringFromForm(formData.get(key))]));
 }
 
 function stringFromForm(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value : "";
+}
+
+function stringListFromForm(formData: FormData, key: string) {
+  return formData.getAll(key).filter((value): value is string => typeof value === "string");
+}
+
+function uniqueValues<T>(values: T[]) {
+  return Array.from(new Set(values));
 }
 
 function uniqueLines(value: string) {

@@ -26,9 +26,16 @@ export function parseDataForSeoItems(responseBody: unknown, options: ParseOption
       const items = asRecord(result)?.items;
       if (!Array.isArray(items)) return [];
 
-      return items.map((item) => parseItem(item, options));
+      return items.flatMap((item) => parseItemTree(item, options));
     });
   });
+}
+
+function parseItemTree(item: unknown, options: ParseOptions): ParsedRankItem[] {
+  const parsed = parseItem(item, options);
+  const nestedItems = asRecord(item)?.items;
+  if (!Array.isArray(nestedItems)) return [parsed];
+  return [parsed, ...nestedItems.flatMap((nestedItem) => parseItemTree(nestedItem, options))];
 }
 
 function parseItem(item: unknown, options: ParseOptions): ParsedRankItem {
@@ -40,7 +47,9 @@ function parseItem(item: unknown, options: ParseOptions): ParsedRankItem {
   const targetBusinessName = options.targetBusinessName?.toLowerCase().trim();
   const normalizedDomain = normalizeDomain(domain);
 
-  const domainMatched = Boolean(targetDomain && normalizedDomain?.includes(targetDomain));
+  const domainMatched = Boolean(
+    targetDomain && (normalizedDomain === targetDomain || normalizedDomain?.endsWith(`.${targetDomain}`))
+  );
   const nameMatched = Boolean(targetBusinessName && title?.toLowerCase().includes(targetBusinessName));
 
   return {
@@ -78,5 +87,12 @@ function extractDomain(url?: string) {
 }
 
 function normalizeDomain(domain?: string) {
-  return domain?.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "").toLowerCase();
+  if (!domain) return undefined;
+
+  try {
+    const hostname = new URL(domain.includes("://") ? domain : `https://${domain}`).hostname;
+    return hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return domain.replace(/^www\./, "").replace(/\/$/, "").toLowerCase();
+  }
 }

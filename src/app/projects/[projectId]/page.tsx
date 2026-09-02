@@ -8,12 +8,20 @@ import {
   updateProject
 } from "@/app/actions";
 import { Icon } from "@/components/icon";
+import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectDetailPage({ params }: { params: Promise<{ projectId: string }> }) {
+export default async function ProjectDetailPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ projectId: string }>;
+  searchParams: Promise<{ sandboxError?: string }>;
+}) {
   const { projectId } = await params;
+  const { sandboxError } = await searchParams;
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -27,6 +35,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const updateProjectWithId = updateProject.bind(null, project.id);
+  const activeKeywords = project.keywords.filter((keyword) => keyword.active);
+  const activeLocations = project.locations.filter((location) => location.active);
+  const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
 
   return (
     <>
@@ -39,6 +50,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p>{project.domain} {project.serviceArea ? `- ${project.serviceArea}` : ""}</p>
         </div>
       </header>
+
+      {sandboxError ? <div className="notice danger-notice"><strong>Sandbox check not started.</strong> {sandboxError}</div> : null}
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
@@ -66,11 +79,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <div className="card">
           <p className="label label-with-icon"><Icon name="graph" />Tracking Summary</p>
           <div className="summary-list">
-            <span><strong>{project.keywords.filter((keyword) => keyword.active).length}</strong> active keywords</span>
-            <span><strong>{project.locations.filter((location) => location.active).length}</strong> active locations</span>
+            <span><strong>{activeKeywords.length}</strong> active keywords</span>
+            <span><strong>{activeLocations.length}</strong> active locations</span>
             <span><strong>{project.rankRuns.length}</strong> recent runs</span>
           </div>
         </div>
+      </section>
+
+      <section style={{ marginTop: 18 }}>
+        <SandboxRunForm
+          projectId={project.id}
+          keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
+          locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
+          credentialsConfigured={credentialsConfigured}
+        />
       </section>
 
       <section className="grid two" style={{ marginTop: 18 }}>
@@ -150,7 +172,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <tbody>
             {project.rankRuns.map((run) => (
               <tr key={run.id}>
-                <td>{run.createdAt.toLocaleDateString("en-GB")}</td>
+                <td><Link href={`/runs/${run.id}`}>{run.createdAt.toLocaleDateString("en-GB")}</Link></td>
                 <td><span className="status">{run.status}</span></td>
                 <td>{run.sandbox ? "Sandbox" : "Live"}</td>
                 <td>{run.results.length}</td>

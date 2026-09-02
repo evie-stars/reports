@@ -65,7 +65,7 @@ export class DataForSeoClient {
       responseBody: body,
       statusCode: response.status,
       tag: task.tag,
-      costUsd: Number(body?.cost ?? 0)
+      costUsd: readCost(body)
     };
   }
 
@@ -78,4 +78,17 @@ export class DataForSeoClient {
       throw new Error(`Live run blocked: ${taskCount} tasks exceeds DATAFORSEO_MAX_LIVE_TASKS_PER_RUN=${this.maxLiveTasks}.`);
     }
   }
+}
+
+function readCost(body: unknown) {
+  if (!body || typeof body !== "object") return 0;
+  const response = body as { cost?: unknown; tasks?: unknown };
+  if (typeof response.cost === "number") return response.cost;
+  if (!Array.isArray(response.tasks)) return 0;
+
+  return response.tasks.reduce((total, task) => {
+    if (!task || typeof task !== "object") return total;
+    const cost = (task as { cost?: unknown }).cost;
+    return total + (typeof cost === "number" ? cost : 0);
+  }, 0);
 }

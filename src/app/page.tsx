@@ -41,7 +41,7 @@ export default async function DashboardPage() {
             <tbody>
               {data.runs.map((run) => (
                 <tr key={run.id}>
-                  <td>{run.project.client.name} / {run.project.name}</td>
+                  <td><Link href={`/runs/${run.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
                   <td><span className="status">{run.status}</span></td>
                   <td>{run.sandbox ? "Sandbox" : "Live"}</td>
                   <td>${run.actualCostUsd.toString()}</td>

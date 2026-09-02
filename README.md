@@ -10,6 +10,19 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 - Allow one guarded live check only when explicitly enabled.
 - Provide the foundation for later GA4 and Google Search Console imports.
 
+## Sandbox Rank Checks
+
+Open a project and use **Sandbox Rank Check** to choose active keywords, locations, devices, and result types. The form defaults to one organic desktop task and is capped at 24 sandbox tasks per batch.
+
+Each run stores:
+
+- One ranking snapshot per selected task.
+- Matched rank, URL, and movement from the previous stored snapshot.
+- Organic SERP features.
+- The full DataForSEO request and response audit, including errors and reported cost.
+
+The project action always calls the DataForSEO sandbox host. It cannot be switched to live mode from the interface.
+
 ## Local Setup
 
 1. Install dependencies:

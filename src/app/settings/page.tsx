@@ -4,6 +4,7 @@ export default function SettingsPage() {
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const maxLiveTasks = process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1";
+  const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
 
   return (
     <>
@@ -19,6 +20,10 @@ export default function SettingsPage() {
           <p className="label label-with-icon"><Icon name="settings" />DataForSEO</p>
           <table className="table">
             <tbody>
+              <tr>
+                <th>Credentials</th>
+                <td><span className={credentialsConfigured ? "status good" : "status danger"}>{credentialsConfigured ? "Configured" : "Missing"}</span></td>
+              </tr>
               <tr>
                 <th>Default Mode</th>
                 <td>{sandbox ? "Sandbox" : "Live"}</td>
