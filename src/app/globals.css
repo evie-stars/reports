@@ -50,9 +50,9 @@ a {
   flex-direction: column;
   gap: 28px;
   background:
-    radial-gradient(120% 55% at 10% 0%, rgba(34, 101, 179, 0.8) 0%, rgba(34, 101, 179, 0) 70%),
-    radial-gradient(110% 48% at 100% 100%, rgba(80, 167, 117, 0.54) 0%, rgba(80, 167, 117, 0) 72%),
-    linear-gradient(160deg, #1e232d 0%, #192b3a 54%, #1e232d 100%);
+    radial-gradient(120% 55% at 10% 0%, rgba(34, 101, 179, 0.42) 0%, rgba(34, 101, 179, 0) 70%),
+    radial-gradient(110% 48% at 100% 100%, rgba(80, 167, 117, 0.26) 0%, rgba(80, 167, 117, 0) 72%),
+    linear-gradient(160deg, #1e232d 0%, #1c2731 54%, #1e232d 100%);
   color: white;
   overflow: hidden;
   padding: 26px 18px;
@@ -61,7 +61,7 @@ a {
 }
 
 .sidebar::before {
-  background: linear-gradient(145deg, rgba(34, 101, 179, 0.38), transparent 42%, rgba(80, 167, 117, 0.3));
+  background: linear-gradient(145deg, rgba(34, 101, 179, 0.18), transparent 42%, rgba(80, 167, 117, 0.14));
   content: "";
   filter: blur(34px);
   inset: -28px;
@@ -73,7 +73,7 @@ a {
 .sidebar h1 {
   margin: 13px 0 0;
   font-size: 23px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.15;
 }
 
@@ -85,7 +85,7 @@ a {
 .brand-logo {
   display: block;
   height: auto;
-  max-width: 104px;
+  max-width: 88px;
   width: 100%;
 }
 
@@ -100,7 +100,7 @@ a {
   color: #dbe7e9;
   display: flex;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   gap: 10px;
   padding: 11px 12px;
 }
@@ -336,7 +336,7 @@ main {
   min-height: 42px;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: linear-gradient(135deg, var(--light-blue), #277e91 68%, var(--green));
+  background: var(--light-blue);
   color: white;
   cursor: pointer;
   padding: 0 16px;
@@ -345,7 +345,7 @@ main {
 }
 
 .button:hover {
-  background: linear-gradient(135deg, var(--accent-strong), #236f81 68%, #438f64);
+  background: var(--accent-strong);
   border-color: var(--accent-strong);
   transform: translateY(-1px);
 }
