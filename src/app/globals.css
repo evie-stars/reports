@@ -198,6 +198,12 @@ main {
   line-height: 1.5;
 }
 
+.page-header-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -528,6 +534,50 @@ main {
 
 .client-create-fields {
   grid-template-columns: minmax(220px, 0.7fr) minmax(280px, 1.3fr);
+}
+
+.history-import-form {
+  margin-bottom: 0;
+}
+
+.history-import-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.history-import-heading h3 {
+  margin-bottom: 0;
+}
+
+.history-import-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(180px, 0.8fr) minmax(180px, 0.8fr);
+}
+
+.history-file-field input[type="file"] {
+  cursor: pointer;
+  padding: 6px;
+}
+
+.history-file-field input[type="file"]::file-selector-button {
+  background: var(--surface-strong);
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  margin-right: 10px;
+  padding: 6px 9px;
+}
+
+.notice.danger {
+  background: #fee7e5;
+  border-color: #f1b7b2;
+  color: var(--danger);
 }
 
 .form-row {
@@ -1474,6 +1524,16 @@ main {
 
   .client-create-fields {
     grid-template-columns: 1fr;
+  }
+
+  .history-import-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header-actions {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .sandbox-options {

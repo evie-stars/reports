@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
+import { importRankHistoryCsv } from "@/lib/rank-history-import";
 import { executeLiveRankRun, executeSandboxRankRun } from "@/lib/rank-runner";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
@@ -67,6 +68,30 @@ export async function createClient(formData: FormData) {
 
   revalidatePath("/clients");
   redirect(`/clients/${client.id}?view=settings`);
+}
+
+export async function importRankHistory(formData: FormData) {
+  let clientId: string;
+
+  try {
+    const file = formData.get("historyFile");
+    if (!(file instanceof File) || file.size === 0) throw new Error("Choose a historical ranking CSV to import.");
+    if (file.size > 900 * 1024) throw new Error("The CSV must be smaller than 900 KB.");
+    if (!file.name.toLowerCase().endsWith(".csv")) throw new Error("The historical ranking file must be a CSV.");
+
+    const result = await importRankHistoryCsv(await file.text(), {
+      clientName: stringFromForm(formData.get("clientName")),
+      projectName: stringFromForm(formData.get("projectName"))
+    });
+    clientId = result.clientId;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to import the historical rankings.";
+    redirect(`/clients?import=1&importError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/clients");
+  redirect(`/clients/${clientId}`);
 }
 
 export async function updateClient(clientId: string, formData: FormData) {

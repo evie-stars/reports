@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/app/actions";
+import { createClient, importRankHistory } from "@/app/actions";
 import { ClientTable } from "@/components/client-table";
 import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 export default async function ClientsPage({
   searchParams
 }: {
-  searchParams: Promise<{ new?: string }>;
+  searchParams: Promise<{ new?: string; import?: string; importError?: string }>;
 }) {
-  const { new: showNewClient } = await searchParams;
+  const { new: showNewClient, import: showImport, importError } = await searchParams;
   const { clients, dbUnavailable } = await getClientsData();
 
   return (
@@ -21,9 +21,14 @@ export default async function ClientsPage({
           <h2>Clients</h2>
           <p>Open a client to view their latest report.</p>
         </div>
-        <Link className="button" href={showNewClient ? "/clients" : "/clients?new=1"}>
-          {showNewClient ? "Close" : "Add Client"}
-        </Link>
+        <div className="page-header-actions">
+          <Link className="button button-secondary" href={showImport ? "/clients" : "/clients?import=1"}>
+            {showImport ? "Close Import" : "Import History"}
+          </Link>
+          <Link className="button" href={showNewClient ? "/clients" : "/clients?new=1"}>
+            {showNewClient ? "Close" : "Add Client"}
+          </Link>
+        </div>
       </header>
 
       {dbUnavailable ? (
@@ -50,7 +55,35 @@ export default async function ClientsPage({
         </form>
       ) : null}
 
-      <section className={`card client-table-card${showNewClient ? " spaced-section" : ""}`}>
+      {showImport ? (
+        <form className="card form history-import-form" action={importRankHistory}>
+          <div className="history-import-heading">
+            <div>
+              <p className="label label-with-icon"><Icon name="graph" />Import Ranking History</p>
+              <h3>Legacy rank checker CSV</h3>
+            </div>
+            <span className="status good">No API requests</span>
+          </div>
+          {importError ? <div className="notice danger"><strong>Import failed.</strong><span> {importError}</span></div> : null}
+          <div className="history-import-fields">
+            <label className="history-file-field">
+              CSV file
+              <input name="historyFile" type="file" accept=".csv,text/csv" required />
+            </label>
+            <label>
+              Client name
+              <input name="clientName" placeholder="Use name from CSV" />
+            </label>
+            <label>
+              Report name
+              <input name="projectName" placeholder="Organic Rankings" />
+            </label>
+          </div>
+          <button className="button" type="submit">Import Client History</button>
+        </form>
+      ) : null}
+
+      <section className={`card client-table-card${showNewClient || showImport ? " spaced-section" : ""}`}>
         <ClientTable clients={clients} />
       </section>
     </>
