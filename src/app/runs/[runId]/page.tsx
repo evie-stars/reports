@@ -31,7 +31,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
           <p className="breadcrumb">
             <Link href="/runs">Rank Runs</Link> / <Link href={`/projects/${run.project.id}`}>{run.project.name}</Link>
           </p>
-          <h2>Sandbox Run</h2>
+          <h2>{run.sandbox ? "Sandbox Run" : "Live Run"}</h2>
           <p>{run.project.client.name} / {run.project.name} · {run.createdAt.toLocaleString("en-GB")}</p>
         </div>
         <span className={`status ${statusClass(run.status)}`}>{run.status}</span>

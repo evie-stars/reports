@@ -21,7 +21,13 @@ Each run stores:
 - Organic SERP features.
 - The full DataForSEO request and response audit, including errors and reported cost.
 
-The project action always calls the DataForSEO sandbox host. It cannot be switched to live mode from the interface.
+The sandbox action always calls the DataForSEO sandbox host and cannot be promoted to live mode. Paid calls use the separate single live verification control below.
+
+## Single Live Verification
+
+The project page also includes a one-task live verification control. It remains disabled unless `DATAFORSEO_LIVE_ENABLED=true`, requires an explicit paid-request confirmation, and accepts exactly one keyword, location, device, and result type. Search operators that can multiply the DataForSEO charge are blocked for this initial test.
+
+The interface shows DataForSEO's current `$0.002` Live SERP base price. The exact cost returned by DataForSEO is stored on the run and API audit records.
 
 ## Local Setup
 

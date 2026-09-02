@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const data = await getDashboardData();
+  const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
 
   return (
     <>
@@ -60,11 +61,13 @@ export default async function DashboardPage() {
           <p className="label">DataForSEO Guardrails</p>
           <h3>Sandbox first</h3>
           <p className="muted">
-            Live API calls are blocked unless `DATAFORSEO_LIVE_ENABLED=true` is set. Keep the first real test to one task while the trial credit is limited.
+            {liveEnabled
+              ? "Live API access is enabled, with the project interface restricted to one explicitly confirmed task."
+              : "Live API calls are blocked. Sandbox checks remain free while the integration is being verified."}
           </p>
           <div className="check-list">
             <span>Sandbox mode enabled by default</span>
-            <span>Live runs capped to one task</span>
+            <span>Live verification capped to one task</span>
             <span>API requests logged with project tags</span>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { executeSandboxRankRun } from "@/lib/rank-runner";
+import { executeLiveRankRun, executeSandboxRankRun } from "@/lib/rank-runner";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
 
@@ -63,6 +63,15 @@ const sandboxRunSchema = z.object({
   locationIds: z.array(z.string().trim().min(1)).transform(uniqueValues),
   devices: z.array(z.enum(["desktop", "mobile"])).transform(uniqueValues),
   searchTypes: z.array(z.enum(["organic", "local_finder", "maps"])).transform(uniqueValues)
+});
+
+const liveRunSchema = z.object({
+  projectId: z.string().trim().min(1),
+  keywordId: z.string().trim().min(1),
+  locationId: z.string().trim().min(1),
+  device: z.enum(["desktop", "mobile"]),
+  searchType: z.enum(["organic", "local_finder", "maps"]),
+  confirmLiveCost: z.literal("yes")
 });
 
 export async function createClient(formData: FormData) {
@@ -171,6 +180,30 @@ export async function runSandboxCheck(projectId: string, formData: FormData) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the sandbox check.";
     redirect(`/projects/${projectId}?sandboxError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/runs");
+  revalidatePath(`/projects/${projectId}`);
+  redirect(`/runs/${runId}`);
+}
+
+export async function runLiveCheck(projectId: string, formData: FormData) {
+  let runId: string;
+
+  try {
+    const selection = liveRunSchema.parse({
+      projectId,
+      keywordId: stringFromForm(formData.get("keywordId")),
+      locationId: stringFromForm(formData.get("locationId")),
+      device: stringFromForm(formData.get("device")),
+      searchType: stringFromForm(formData.get("searchType")),
+      confirmLiveCost: stringFromForm(formData.get("confirmLiveCost"))
+    });
+    runId = await executeLiveRankRun(selection);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to start the live verification.";
+    redirect(`/projects/${projectId}?liveError=${encodeURIComponent(message)}`);
   }
 
   revalidatePath("/");

@@ -41,7 +41,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <main>
             <div className="topbar">
               <span>reports.starwebsites.co.uk</span>
-              <span className="status good">Sandbox protected</span>
+              <span className="status good">API guardrails active</span>
             </div>
             {children}
           </main>

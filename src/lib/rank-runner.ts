@@ -1,5 +1,5 @@
 import { Device, Prisma, RankDirection, SearchType } from "@prisma/client";
-import { DataForSeoClient, DataForSeoTask } from "@/lib/dataforseo";
+import { DataForSeoClient, DataForSeoMode, DataForSeoTask } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { MAX_SANDBOX_TASKS } from "@/lib/rank-config";
 import { parseDataForSeoItems, ParsedRankItem } from "@/lib/rank-parser";
@@ -13,6 +13,29 @@ export type SandboxRunSelection = {
 };
 
 export async function executeSandboxRankRun(selection: SandboxRunSelection) {
+  return executeRankRun(selection, "sandbox");
+}
+
+export async function executeLiveRankRun(selection: {
+  projectId: string;
+  keywordId: string;
+  locationId: string;
+  device: Device;
+  searchType: SearchType;
+}) {
+  return executeRankRun(
+    {
+      projectId: selection.projectId,
+      keywordIds: [selection.keywordId],
+      locationIds: [selection.locationId],
+      devices: [selection.device],
+      searchTypes: [selection.searchType]
+    },
+    "live"
+  );
+}
+
+async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMode) {
   const project = await prisma.project.findUnique({
     where: { id: selection.projectId },
     include: {
@@ -36,22 +59,33 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
   const requestedTasks =
     project.keywords.length * project.locations.length * selection.devices.length * selection.searchTypes.length;
 
-  if (requestedTasks > MAX_SANDBOX_TASKS) {
+  if (mode === "sandbox" && requestedTasks > MAX_SANDBOX_TASKS) {
     throw new Error(`Sandbox batch limited to ${MAX_SANDBOX_TASKS} tasks. Reduce the selection and run another batch.`);
   }
+
+  if (mode === "live" && requestedTasks !== 1) {
+    throw new Error("Live verification is restricted to exactly one task.");
+  }
+
+  if (mode === "live" && project.keywords.some((keyword) => hasCostMultiplyingOperator(keyword.phrase))) {
+    throw new Error("This keyword contains a search operator that can multiply DataForSEO cost. Use a plain keyword for the first live test.");
+  }
+
+  const client = new DataForSeoClient();
+  client.assertSafeToRun(mode, requestedTasks);
+  const modeLabel = mode === "sandbox" ? "Sandbox" : "Live verification";
 
   const run = await prisma.rankRun.create({
     data: {
       projectId: project.id,
       status: "running",
-      sandbox: true,
+      sandbox: mode === "sandbox",
       startedAt: new Date(),
       requestedTasks,
-      notes: `Sandbox batch: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s).`
+      notes: `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s).`
     }
   });
 
-  const client = new DataForSeoClient();
   let completedTasks = 0;
   let failedTasks = 0;
   let totalCostUsd = 0;
@@ -61,12 +95,12 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
       for (const device of selection.devices) {
         for (const searchType of selection.searchTypes) {
           const tag = buildDataForSeoTag(project.clientId, project.id, run.id, searchType, device);
-          const task = buildTask(keyword.phrase, location, device, tag);
+          const task = buildTask(keyword.phrase, location, device, searchType, mode, tag);
           const endpoint = `/v3/serp/google/${searchType}/live/advanced`;
           let apiRequestId: string | undefined;
 
           try {
-            const response = await client.postSerpTask(searchType, task, "sandbox");
+            const response = await client.postSerpTask(searchType, task, mode);
             const responseError = getDataForSeoError(response.responseBody, response.statusCode);
 
             const apiRequest = await prisma.apiRequest.create({
@@ -74,7 +108,7 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
                 rankRunId: run.id,
                 endpoint: response.endpoint,
                 tag: response.tag,
-                sandbox: true,
+                sandbox: mode === "sandbox",
                 requestBody: response.requestBody as Prisma.InputJsonValue,
                 responseBody: response.responseBody as Prisma.InputJsonValue,
                 statusCode: response.statusCode,
@@ -145,7 +179,7 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
                   rankRunId: run.id,
                   endpoint,
                   tag,
-                  sandbox: true,
+                  sandbox: mode === "sandbox",
                   requestBody: [task] as Prisma.InputJsonValue,
                   errorMessage: errorMessage(error)
                 }
@@ -158,7 +192,7 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
   }
 
   const status = completedTasks === 0 ? "failed" : "completed";
-  const summary = `${completedTasks} of ${requestedTasks} sandbox task(s) completed${failedTasks ? `; ${failedTasks} failed` : ""}.`;
+  const summary = `${completedTasks} of ${requestedTasks} ${mode} task(s) completed${failedTasks ? `; ${failedTasks} failed` : ""}.`;
 
   await prisma.rankRun.update({
     where: { id: run.id },
@@ -183,6 +217,8 @@ function buildTask(
     radiusMeters: number | null;
   },
   device: Device,
+  searchType: SearchType,
+  mode: DataForSeoMode,
   tag: string
 ): DataForSeoTask {
   const locationInput = location.dataForSeoLocationName
@@ -197,9 +233,20 @@ function buildTask(
     language_code: "en",
     device,
     os: device === "mobile" ? "android" : "windows",
-    depth: 20,
+    depth: getDepth(searchType, device, mode),
     tag
   };
+}
+
+function getDepth(searchType: SearchType, device: Device, mode: DataForSeoMode) {
+  if (mode === "sandbox") return 20;
+  if (searchType === "organic") return 10;
+  if (searchType === "local_finder") return device === "mobile" ? 10 : 20;
+  return 20;
+}
+
+function hasCostMultiplyingOperator(keyword: string) {
+  return /(^|\s)-?(allinanchor|allintext|allintitle|allinurl|cache|define|definition|filetype|inanchor|info|intext|intitle|inurl|link|site):/i.test(keyword);
 }
 
 async function findPreviousResult(keywordId: string, locationId: string, searchType: SearchType, device: Device) {
@@ -264,7 +311,7 @@ function buildDataForSeoTag(
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown sandbox request failure.";
+  return error instanceof Error ? error.message : "Unknown rank request failure.";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

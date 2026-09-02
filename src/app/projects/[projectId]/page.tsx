@@ -8,6 +8,7 @@ import {
   updateProject
 } from "@/app/actions";
 import { Icon } from "@/components/icon";
+import { LiveRunForm } from "@/components/live-run-form";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
 
@@ -18,10 +19,10 @@ export default async function ProjectDetailPage({
   searchParams
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ sandboxError?: string }>;
+  searchParams: Promise<{ sandboxError?: string; liveError?: string }>;
 }) {
   const { projectId } = await params;
-  const { sandboxError } = await searchParams;
+  const { sandboxError, liveError } = await searchParams;
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -38,6 +39,7 @@ export default async function ProjectDetailPage({
   const activeKeywords = project.keywords.filter((keyword) => keyword.active);
   const activeLocations = project.locations.filter((location) => location.active);
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
 
   return (
     <>
@@ -52,6 +54,7 @@ export default async function ProjectDetailPage({
       </header>
 
       {sandboxError ? <div className="notice danger-notice"><strong>Sandbox check not started.</strong> {sandboxError}</div> : null}
+      {liveError ? <div className="notice danger-notice"><strong>Live check not started.</strong> {liveError}</div> : null}
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
@@ -92,6 +95,16 @@ export default async function ProjectDetailPage({
           keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
           locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
           credentialsConfigured={credentialsConfigured}
+        />
+      </section>
+
+      <section style={{ marginTop: 18 }}>
+        <LiveRunForm
+          projectId={project.id}
+          keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
+          locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
+          credentialsConfigured={credentialsConfigured}
+          liveEnabled={liveEnabled}
         />
       </section>
 

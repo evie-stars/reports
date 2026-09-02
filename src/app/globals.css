@@ -495,6 +495,72 @@ main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.live-options {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.live-options label {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.live-options select {
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 15px) 17px / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 10px) 17px / 5px 5px no-repeat,
+    #fbfcfd;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  min-height: 40px;
+  padding: 8px 28px 8px 10px;
+  width: 100%;
+}
+
+.live-options select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(34, 101, 179, 0.13);
+  outline: none;
+}
+
+.live-confirmation {
+  align-items: center;
+  background: #fff8e7;
+  border: 1px solid #efd28c;
+  border-radius: 6px;
+  color: #5f3b00;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  padding: 11px 12px;
+}
+
+.live-confirmation input {
+  accent-color: var(--green);
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.live-button:not(:disabled) {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.live-button:not(:disabled):hover {
+  background: #3f8a60;
+  border-color: #3f8a60;
+}
+
 .choice-group {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -607,6 +673,10 @@ main {
   }
 
   .sandbox-options {
+    grid-template-columns: 1fr;
+  }
+
+  .live-options {
     grid-template-columns: 1fr;
   }
 
