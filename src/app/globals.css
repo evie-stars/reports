@@ -18,6 +18,9 @@
   --danger: #b42318;
   --good: #347e58;
   --shadow: 0 10px 30px rgba(30, 35, 45, 0.07), 0 2px 8px rgba(34, 101, 179, 0.04);
+  --shadow-hover: 0 14px 34px rgba(30, 35, 45, 0.09), 0 4px 12px rgba(34, 101, 179, 0.06);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -44,6 +47,24 @@ html {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(34, 101, 179, 0.72);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: rgba(34, 101, 179, 0.18);
+  color: var(--text);
 }
 
 .app-shell {
@@ -80,6 +101,7 @@ a {
   pointer-events: none;
   position: absolute;
   z-index: -1;
+  animation: sidebar-glow 12s ease-in-out infinite alternate;
 }
 
 .sidebar h1 {
@@ -99,6 +121,12 @@ a {
   height: auto;
   max-width: 88px;
   width: 100%;
+  transition: filter 240ms ease, transform 240ms var(--ease-out);
+}
+
+.brand-block:hover .brand-logo {
+  filter: drop-shadow(0 5px 12px rgba(34, 101, 179, 0.25));
+  transform: translateY(-1px);
 }
 
 .sidebar nav {
@@ -115,12 +143,34 @@ a {
   font-weight: 500;
   gap: 10px;
   padding: 11px 12px;
+  position: relative;
+  transition: background-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms var(--ease-out);
 }
 
-.sidebar nav a:hover {
+.sidebar nav a::before {
+  background: var(--green);
+  border-radius: 0 3px 3px 0;
+  content: "";
+  height: 20px;
+  left: -16px;
+  opacity: 0;
+  position: absolute;
+  transform: scaleY(0.35);
+  transition: opacity 180ms ease, transform 220ms var(--ease-out);
+  width: 3px;
+}
+
+.sidebar nav a:hover,
+.sidebar nav a.active {
   background: linear-gradient(90deg, rgba(34, 101, 179, 0.56), rgba(80, 167, 117, 0.22));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: white;
+  transform: translateX(2px);
+}
+
+.sidebar nav a.active::before {
+  opacity: 1;
+  transform: scaleY(1);
 }
 
 .sidebar nav a .icon {
@@ -128,6 +178,13 @@ a {
   height: 18px;
   opacity: 0.88;
   width: 18px;
+  transition: opacity 180ms ease, transform 220ms var(--ease-out);
+}
+
+.sidebar nav a:hover .icon,
+.sidebar nav a.active .icon {
+  opacity: 1;
+  transform: scale(1.06);
 }
 
 main {
@@ -165,6 +222,7 @@ main {
   left: 22px;
   position: absolute;
   width: 148px;
+  animation: topbar-line-in 700ms var(--ease-out) both;
 }
 
 .icon {
@@ -223,12 +281,13 @@ main {
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 15px;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition: border-color 180ms ease, box-shadow 220ms ease, transform 220ms var(--ease-out);
 }
 
 .card:hover {
   border-color: rgba(34, 101, 179, 0.28);
-  box-shadow: 0 12px 34px rgba(30, 35, 45, 0.09), 0 3px 10px rgba(80, 167, 117, 0.06);
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
 }
 
 .card h3 {
@@ -352,6 +411,14 @@ main {
   vertical-align: middle;
 }
 
+.table tbody tr {
+  transition: background-color 150ms ease, box-shadow 180ms ease;
+}
+
+.table tbody tr:hover {
+  background: rgba(34, 101, 179, 0.035);
+}
+
 .table th {
   color: var(--muted);
   font-size: 12px;
@@ -367,7 +434,7 @@ main {
   border: 0;
   display: inline-flex;
   align-items: center;
-  cursor: pointer;
+  cursor: default;
   min-height: 26px;
   border-radius: 999px;
   background: var(--surface-strong);
@@ -375,6 +442,15 @@ main {
   color: var(--text);
   font-size: 12px;
   font-weight: 700;
+  transition: background-color 180ms ease, color 180ms ease, transform 180ms var(--ease-out);
+}
+
+button.status {
+  cursor: pointer;
+}
+
+button.status:hover {
+  transform: translateY(-1px);
 }
 
 .status.good {
@@ -405,7 +481,8 @@ main {
   padding: 0 13px;
   font-size: 13px;
   font-weight: 500;
-  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+  box-shadow: 0 2px 5px rgba(34, 101, 179, 0.14);
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 180ms ease, transform 180ms var(--ease-out);
   white-space: nowrap;
 }
 
@@ -413,12 +490,19 @@ main {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
   transform: translateY(-1px);
+  box-shadow: 0 7px 16px rgba(34, 101, 179, 0.18);
+}
+
+.button:active {
+  box-shadow: 0 2px 5px rgba(34, 101, 179, 0.13);
+  transform: translateY(0) scale(0.985);
 }
 
 .button-secondary {
   background: var(--surface);
   border-color: var(--line);
   color: var(--text);
+  box-shadow: none;
 }
 
 .button-secondary:hover {
@@ -439,11 +523,14 @@ main {
   gap: 8px;
   min-height: 36px;
   padding: 0 12px;
+  transition: border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms var(--ease-out);
 }
 
 .icon-text-button:hover {
   border-color: var(--accent);
   color: var(--accent-strong);
+  box-shadow: 0 5px 13px rgba(30, 35, 45, 0.07);
+  transform: translateY(-1px);
 }
 
 .icon-button {
@@ -454,11 +541,13 @@ main {
   height: 32px;
   justify-content: center;
   width: 32px;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 180ms var(--ease-out);
 }
 
 .icon-button:hover {
   background: var(--accent-soft);
   border-color: rgba(34, 101, 179, 0.18);
+  transform: translateY(-1px);
 }
 
 .button:disabled {
@@ -510,6 +599,7 @@ main {
   font-weight: 400;
   min-height: 40px;
   padding: 9px 10px;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .form input:focus,
@@ -517,6 +607,7 @@ main {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(34, 101, 179, 0.13);
   outline: none;
+  background: white;
 }
 
 .form textarea {
@@ -625,6 +716,7 @@ main {
   font: inherit;
   min-height: 40px;
   width: 100%;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, width 220ms var(--ease-out);
 }
 
 .client-search input:focus {
@@ -998,18 +1090,47 @@ main {
   gap: 5px;
   min-height: 100px;
   padding: 12px 14px;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 180ms ease, box-shadow 220ms ease, transform 220ms var(--ease-out);
+}
+
+.report-stat::after {
+  background: currentColor;
+  bottom: 0;
+  content: "";
+  height: 2px;
+  left: 0;
+  opacity: 0.55;
+  position: absolute;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 320ms var(--ease-out);
+  width: 100%;
+}
+
+.report-stat:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+}
+
+.report-stat:hover::after {
+  transform: scaleX(1);
 }
 
 .report-stat.green {
   border-top-color: var(--green);
+  color: var(--green);
 }
 
 .report-stat.blue {
   border-top-color: var(--light-blue);
+  color: var(--light-blue);
 }
 
 .report-stat.dark {
   border-top-color: var(--dark-blue);
+  color: var(--dark-blue);
 }
 
 .report-stat > span {
@@ -1017,17 +1138,20 @@ main {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
+  color: var(--muted);
 }
 
 .report-stat > strong {
   font-size: 26px;
   line-height: 1.1;
+  color: var(--text);
 }
 
 .report-stat > small {
   align-self: end;
   color: var(--muted);
   font-size: 12px;
+  color: var(--muted);
 }
 
 .trend-card {
@@ -1056,6 +1180,14 @@ main {
   font-weight: 700;
   padding: 4px 8px;
   white-space: nowrap;
+  transition: filter 160ms ease, transform 180ms var(--ease-out);
+}
+
+.movement-count:hover,
+.change-label:hover,
+.issue-list span:hover {
+  filter: saturate(1.08);
+  transform: translateY(-1px);
 }
 
 .movement-count.up,
@@ -1138,6 +1270,9 @@ main {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 3;
+  stroke-dasharray: 1600;
+  stroke-dashoffset: 1600;
+  animation: chart-line-draw 1.15s 180ms var(--ease-out) forwards;
 }
 
 .chart-line.page-one,
@@ -1153,6 +1288,15 @@ main {
 .chart-point {
   fill: white;
   stroke-width: 3;
+  animation: chart-point-in 320ms 850ms var(--ease-out) both;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: r 150ms ease, stroke-width 150ms ease;
+}
+
+.chart-point:hover {
+  r: 5.5px;
+  stroke-width: 4;
 }
 
 .chart-empty {
@@ -1182,6 +1326,13 @@ main {
   gap: 10px;
   grid-template-columns: repeat(6, minmax(120px, 1fr)) auto;
   padding: 10px;
+  box-shadow: 0 3px 12px rgba(30, 35, 45, 0.035);
+  transition: border-color 180ms ease, box-shadow 220ms ease;
+}
+
+.report-filters:focus-within {
+  border-color: rgba(34, 101, 179, 0.28);
+  box-shadow: 0 7px 20px rgba(30, 35, 45, 0.055);
 }
 
 .report-filters label {
@@ -1207,6 +1358,7 @@ main {
   min-height: 38px;
   padding: 7px 26px 7px 9px;
   width: 100%;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .report-filters select:focus {
@@ -1240,6 +1392,12 @@ main {
 
 .comparison-table tbody tr {
   box-shadow: inset 3px 0 transparent;
+  transition: background-color 150ms ease, box-shadow 180ms ease, transform 180ms var(--ease-out);
+}
+
+.comparison-table tbody tr:hover {
+  background: rgba(34, 101, 179, 0.045);
+  transform: translateX(1px);
 }
 
 .comparison-table tbody tr.up,
@@ -1294,6 +1452,7 @@ main {
   display: inline-flex;
   font-weight: 700 !important;
   gap: 4px;
+  transition: color 160ms ease;
 }
 
 .sort-header:hover,
@@ -1305,6 +1464,11 @@ main {
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
+  transition: transform 180ms var(--ease-out);
+}
+
+.sort-header:hover .sort-indicator {
+  transform: translateY(-1px);
 }
 
 .rank-highlight.up,
@@ -1335,6 +1499,7 @@ main {
   background: rgba(30, 35, 45, 0.42);
   inset: 0;
   position: absolute;
+  animation: backdrop-in 180ms ease-out both;
 }
 
 .report-drawer {
@@ -1348,6 +1513,7 @@ main {
   right: 0;
   top: 0;
   width: min(650px, 94vw);
+  animation: drawer-in 320ms var(--ease-out) both;
 }
 
 .drawer-header {
@@ -1503,6 +1669,23 @@ main {
   padding: 3px;
 }
 
+.topbar > span:first-child {
+  transition: color 180ms ease;
+}
+
+.topbar > span:first-child:hover {
+  color: var(--text);
+}
+
+.topbar-actions > .status.good::before {
+  animation: status-pulse 2.4s ease-in-out infinite;
+  background: var(--green);
+  border-radius: 50%;
+  content: "";
+  height: 6px;
+  width: 6px;
+}
+
 .rerun-form select,
 .schedule-grid select {
   appearance: none;
@@ -1592,6 +1775,122 @@ main {
   color: var(--muted);
   font-size: 13px;
   margin: 0 0 20px;
+}
+
+.page-content {
+  animation: page-in 360ms var(--ease-out) both;
+}
+
+.page-header {
+  animation: header-in 420ms 40ms var(--ease-out) both;
+}
+
+.report-stat-grid .report-stat,
+.grid.metrics .metric-card {
+  animation: card-in 460ms var(--ease-out) both;
+}
+
+.report-stat-grid .report-stat:nth-child(2),
+.grid.metrics .metric-card:nth-child(2) {
+  animation-delay: 55ms;
+}
+
+.report-stat-grid .report-stat:nth-child(3),
+.grid.metrics .metric-card:nth-child(3) {
+  animation-delay: 110ms;
+}
+
+.report-stat-grid .report-stat:nth-child(4),
+.grid.metrics .metric-card:nth-child(4) {
+  animation-delay: 165ms;
+}
+
+.app-shell > main {
+  scrollbar-color: rgba(104, 115, 125, 0.38) transparent;
+  scrollbar-width: thin;
+}
+
+.app-shell > main::-webkit-scrollbar,
+.table-scroll::-webkit-scrollbar,
+.report-drawer::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.app-shell > main::-webkit-scrollbar-thumb,
+.table-scroll::-webkit-scrollbar-thumb,
+.report-drawer::-webkit-scrollbar-thumb {
+  background: rgba(104, 115, 125, 0.3);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.app-shell > main::-webkit-scrollbar-thumb:hover,
+.table-scroll::-webkit-scrollbar-thumb:hover,
+.report-drawer::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 101, 179, 0.42);
+  background-clip: padding-box;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes header-in {
+  from { opacity: 0; transform: translateX(-7px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes chart-line-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes chart-point-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes drawer-in {
+  from { opacity: 0; transform: translateX(32px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes topbar-line-in {
+  from { opacity: 0; transform: scaleX(0); transform-origin: left; }
+  to { opacity: 1; transform: scaleX(1); transform-origin: left; }
+}
+
+@keyframes sidebar-glow {
+  from { opacity: 0.72; transform: translate3d(-2px, -2px, 0); }
+  to { opacity: 1; transform: translate3d(2px, 2px, 0); }
+}
+
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(80, 167, 117, 0); }
+  45% { box-shadow: 0 0 0 4px rgba(80, 167, 117, 0.13); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media (max-width: 1180px) and (min-width: 901px) {
@@ -1741,6 +2040,22 @@ main {
 }
 
 @media (max-width: 560px) {
+  .topbar {
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .topbar-actions > .status.good {
+    display: none;
+  }
+
+  .topbar-actions > .status {
+    font-size: 10px;
+    padding-left: 7px;
+    padding-right: 7px;
+    white-space: nowrap;
+  }
+
   .summary-strip {
     grid-template-columns: 1fr;
   }

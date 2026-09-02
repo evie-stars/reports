@@ -35,10 +35,10 @@ export function AppShell({
           <h1>Report Hub</h1>
         </div>
         <nav>
-          <Link href="/"><Icon name="home" />Dashboard</Link>
-          <Link href="/clients"><Icon name="contacts" />Clients</Link>
-          <Link href="/runs"><Icon name="graph" />Rank Runs</Link>
-          {appRole !== "sales" ? <Link href="/settings"><Icon name="settings" />Settings</Link> : null}
+          <NavigationLink href="/" pathname={pathname} icon="home">Dashboard</NavigationLink>
+          <NavigationLink href="/clients" pathname={pathname} icon="contacts">Clients</NavigationLink>
+          <NavigationLink href="/runs" pathname={pathname} icon="graph">Rank Runs</NavigationLink>
+          {appRole !== "sales" ? <NavigationLink href="/settings" pathname={pathname} icon="settings">Settings</NavigationLink> : null}
         </nav>
       </aside>
       <main>
@@ -49,8 +49,27 @@ export function AppShell({
             {accountControl}
           </div>
         </div>
-        {children}
+        <div className="page-content" key={pathname}>{children}</div>
       </main>
     </div>
+  );
+}
+
+function NavigationLink({
+  children,
+  href,
+  icon,
+  pathname
+}: {
+  children: React.ReactNode;
+  href: string;
+  icon: "home" | "contacts" | "graph" | "settings";
+  pathname: string;
+}) {
+  const active = href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+  return (
+    <Link className={active ? "active" : undefined} href={href} aria-current={active ? "page" : undefined}>
+      <Icon name={icon} />{children}
+    </Link>
   );
 }
