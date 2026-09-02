@@ -44,9 +44,10 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 
 1. Create a Node.js app in Plesk pointing at this project directory.
 2. Set the application startup file to `server.js`.
-3. Add the environment variables from `.env.example` in Plesk.
-4. Create the database in Plesk and use the connection string as `DATABASE_URL`.
-5. Run:
+3. Set the document root to the `public` subdirectory.
+4. Add the environment variables from `.env.example` in Plesk.
+5. Create the database in Plesk and use the connection string as `DATABASE_URL`.
+6. Run:
 
    ```bash
    npm install
