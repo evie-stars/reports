@@ -1,0 +1,133 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+
+const optionalText = z.string().trim().optional().transform((value) => value || null);
+
+const clientSchema = z.object({
+  name: z.string().trim().min(1, "Client name is required."),
+  notes: optionalText
+});
+
+const projectSchema = z.object({
+  clientId: z.string().trim().min(1),
+  name: z.string().trim().min(1, "Project name is required."),
+  domain: z.string().trim().min(1, "Domain is required."),
+  targetBusinessName: optionalText,
+  serviceArea: optionalText
+});
+
+const keywordSchema = z.object({
+  projectId: z.string().trim().min(1),
+  phrase: z.string().trim().min(1, "Keyword is required."),
+  group: optionalText,
+  targetUrl: optionalText
+});
+
+const optionalNumber = z.preprocess((value) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  return Number(text);
+}, z.number().finite().optional());
+
+const optionalInteger = z.preprocess((value) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  return Number(text);
+}, z.number().int().optional());
+
+const locationSchema = z.object({
+  projectId: z.string().trim().min(1),
+  name: z.string().trim().min(1, "Location name is required."),
+  countryCode: z.string().trim().min(2).max(2).default("GB"),
+  dataForSeoLocationName: optionalText,
+  latitude: optionalNumber,
+  longitude: optionalNumber,
+  radiusMeters: optionalInteger
+});
+
+export async function createClient(formData: FormData) {
+  const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
+  const client = await prisma.client.create({ data });
+
+  revalidatePath("/clients");
+  redirect(`/clients/${client.id}`);
+}
+
+export async function updateClient(clientId: string, formData: FormData) {
+  const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
+  await prisma.client.update({ where: { id: clientId }, data });
+
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function createProject(formData: FormData) {
+  const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
+  const project = await prisma.project.create({ data });
+
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${data.clientId}`);
+  redirect(`/projects/${project.id}`);
+}
+
+export async function updateProject(projectId: string, formData: FormData) {
+  const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
+  await prisma.project.update({ where: { id: projectId }, data });
+
+  revalidatePath(`/clients/${data.clientId}`);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function createKeyword(formData: FormData) {
+  const data = keywordSchema.parse(readForm(formData, ["projectId", "phrase", "group", "targetUrl"]));
+  await prisma.keyword.create({ data });
+
+  revalidatePath(`/projects/${data.projectId}`);
+}
+
+export async function updateKeywordActive(keywordId: string, projectId: string, active: boolean) {
+  await prisma.keyword.update({ where: { id: keywordId }, data: { active } });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function createLocation(formData: FormData) {
+  const data = locationSchema.parse(readForm(formData, [
+    "projectId",
+    "name",
+    "countryCode",
+    "dataForSeoLocationName",
+    "latitude",
+    "longitude",
+    "radiusMeters"
+  ]));
+
+  await prisma.location.create({
+    data: {
+      projectId: data.projectId,
+      name: data.name,
+      countryCode: data.countryCode.toUpperCase(),
+      dataForSeoLocationName: data.dataForSeoLocationName,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      radiusMeters: data.radiusMeters
+    }
+  });
+  revalidatePath(`/projects/${data.projectId}`);
+}
+
+export async function updateLocationActive(locationId: string, projectId: string, active: boolean) {
+  await prisma.location.update({ where: { id: locationId }, data: { active } });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+function readForm(formData: FormData, keys: string[]) {
+  return Object.fromEntries(keys.map((key) => [key, stringFromForm(formData.get(key))]));
+}
+
+function stringFromForm(value: FormDataEntryValue | null) {
+  return typeof value === "string" ? value : "";
+}

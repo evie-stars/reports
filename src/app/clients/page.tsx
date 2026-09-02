@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import Link from "next/link";
+import { createClient } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,7 @@ export default async function ClientsPage() {
       <header className="page-header">
         <div>
           <h2>Clients</h2>
-          <p>Client and project setup for local SEO tracking. Editing forms are the next build step; the schema is ready for them.</p>
+          <p>Client and project setup for local SEO tracking.</p>
         </div>
       </header>
 
@@ -21,11 +23,32 @@ export default async function ClientsPage() {
         </div>
       ) : null}
 
-      <section className="grid">
+      <section className="grid two">
+        <form className="card form" action={createClient}>
+          <p className="label">New Client</p>
+          <label>
+            Client name
+            <input name="name" required placeholder="Star Websites" />
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" rows={4} placeholder="Internal notes, billing context, reporting preferences" />
+          </label>
+          <button className="button" type="submit">Create Client</button>
+        </form>
+
+        <div className="card">
+          <p className="label">Setup Flow</p>
+          <h3>Client, project, keywords, locations</h3>
+          <p className="muted">Create a client first, then add one or more projects. Each project gets its own tracked keywords and search locations.</p>
+        </div>
+      </section>
+
+      <section className="grid" style={{ marginTop: 18 }}>
         {clients.map((client) => (
           <article className="card" key={client.id}>
             <p className="label">{client.projects.length} Projects</p>
-            <h3>{client.name}</h3>
+            <h3><Link href={`/clients/${client.id}`}>{client.name}</Link></h3>
             <table className="table">
               <thead>
                 <tr>
@@ -38,7 +61,7 @@ export default async function ClientsPage() {
               <tbody>
                 {client.projects.map((project) => (
                   <tr key={project.id}>
-                    <td>{project.name}</td>
+                    <td><Link href={`/projects/${project.id}`}>{project.name}</Link></td>
                     <td>{project.domain}</td>
                     <td>{project.keywords.length}</td>
                     <td>{project.locations.length}</td>
