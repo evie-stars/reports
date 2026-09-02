@@ -71,6 +71,7 @@ const liveRunSchema = z.object({
   locationId: z.string().trim().min(1),
   device: z.enum(["desktop", "mobile"]),
   searchType: z.enum(["organic", "local_finder", "maps"]),
+  pageLimit: z.coerce.number().int().min(1).max(10),
   confirmLiveCost: z.literal("yes")
 });
 
@@ -198,6 +199,7 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
       locationId: stringFromForm(formData.get("locationId")),
       device: stringFromForm(formData.get("device")),
       searchType: stringFromForm(formData.get("searchType")),
+      pageLimit: stringFromForm(formData.get("pageLimit")),
       confirmLiveCost: stringFromForm(formData.get("confirmLiveCost"))
     });
     runId = await executeLiveRankRun(selection);

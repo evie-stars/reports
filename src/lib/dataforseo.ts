@@ -16,6 +16,12 @@ export type DataForSeoTask = {
   device: "desktop" | "mobile";
   os?: "windows" | "macos" | "android" | "ios";
   depth?: number;
+  max_crawl_pages?: number;
+  stop_crawl_on_match?: Array<{
+    match_value: string;
+    match_type: "domain" | "with_subdomains" | "wildcard";
+  }>;
+  find_targets_in?: string[];
   tag?: string;
 };
 

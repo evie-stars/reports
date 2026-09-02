@@ -21,9 +21,17 @@ export function LiveRunForm({
   liveEnabled: boolean;
 }) {
   const [confirmed, setConfirmed] = useState(false);
+  const [searchType, setSearchType] = useState("organic");
+  const [pageLimit, setPageLimit] = useState(1);
   const hasTrackingData = keywords.length > 0 && locations.length > 0;
   const ready = credentialsConfigured && liveEnabled && hasTrackingData && confirmed;
+  const estimatedMaximumCost = pageLimit * 0.002;
   const runLiveCheckForProject = runLiveCheck.bind(null, projectId);
+
+  function changeSearchType(value: string) {
+    setSearchType(value);
+    if (value !== "organic") setPageLimit(1);
+  }
 
   return (
     <form className="card sandbox-run live-run" action={runLiveCheckForProject}>
@@ -59,10 +67,23 @@ export function LiveRunForm({
         </label>
         <label>
           Result type
-          <select name="searchType" defaultValue="organic">
+          <select name="searchType" value={searchType} onChange={(event) => changeSearchType(event.target.value)}>
             <option value="organic">Organic</option>
             <option value="local_finder">Local Finder</option>
             <option value="maps">Google Maps</option>
+          </select>
+        </label>
+        <label>
+          Page limit
+          <select
+            name="pageLimit"
+            value={pageLimit}
+            onChange={(event) => setPageLimit(Number(event.target.value))}
+            disabled={searchType !== "organic"}
+          >
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((page) => (
+              <option key={page} value={page}>{page} page{page === 1 ? "" : "s"} · top {page * 10}</option>
+            ))}
           </select>
         </label>
       </div>
@@ -75,25 +96,25 @@ export function LiveRunForm({
           checked={confirmed}
           onChange={(event) => setConfirmed(event.target.checked)}
         />
-        <span>I confirm this will send exactly one paid DataForSEO request.</span>
+        <span>I confirm this will send one paid request covering up to {pageLimit} result page{pageLimit === 1 ? "" : "s"}.</span>
       </label>
 
       <div className="sandbox-run-footer">
         <div>
-          <strong>1 live task · current base price $0.002</strong>
-          <span className="muted">The exact DataForSEO charge will be stored with the result.</span>
+          <strong>Maximum base cost ${estimatedMaximumCost.toFixed(3)}</strong>
+          <span className="muted">The crawl stops when the domain is found; the exact charge is stored with the result.</span>
         </div>
-        <LiveSubmit disabled={!ready} />
+        <LiveSubmit disabled={!ready} pageLimit={pageLimit} />
       </div>
     </form>
   );
 }
 
-function LiveSubmit({ disabled }: { disabled: boolean }) {
+function LiveSubmit({ disabled, pageLimit }: { disabled: boolean; pageLimit: number }) {
   const { pending } = useFormStatus();
   return (
     <button className="button live-button" type="submit" disabled={disabled || pending}>
-      {pending ? "Running live check..." : "Run One Live Check"}
+      {pending ? "Running live check..." : `Check Up To Page ${pageLimit}`}
     </button>
   );
 }

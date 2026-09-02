@@ -22,6 +22,7 @@ export async function executeLiveRankRun(selection: {
   locationId: string;
   device: Device;
   searchType: SearchType;
+  pageLimit: number;
 }) {
   return executeRankRun(
     {
@@ -31,11 +32,12 @@ export async function executeLiveRankRun(selection: {
       devices: [selection.device],
       searchTypes: [selection.searchType]
     },
-    "live"
+    "live",
+    selection.pageLimit
   );
 }
 
-async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMode) {
+async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMode, livePageLimit = 1) {
   const project = await prisma.project.findUnique({
     where: { id: selection.projectId },
     include: {
@@ -67,6 +69,14 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
     throw new Error("Live verification is restricted to exactly one task.");
   }
 
+  if (mode === "live" && (!Number.isInteger(livePageLimit) || livePageLimit < 1 || livePageLimit > 10)) {
+    throw new Error("Live page depth must be between 1 and 10 pages.");
+  }
+
+  if (mode === "live" && selection.searchTypes[0] !== "organic" && livePageLimit !== 1) {
+    throw new Error("Multi-page live verification is currently restricted to Organic results.");
+  }
+
   if (mode === "live" && project.keywords.some((keyword) => hasCostMultiplyingOperator(keyword.phrase))) {
     throw new Error("This keyword contains a search operator that can multiply DataForSEO cost. Use a plain keyword for the first live test.");
   }
@@ -82,7 +92,7 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
       sandbox: mode === "sandbox",
       startedAt: new Date(),
       requestedTasks,
-      notes: `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s).`
+      notes: `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s)${mode === "live" ? `, up to ${livePageLimit} result page(s)` : ""}.`
     }
   });
 
@@ -95,7 +105,7 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
       for (const device of selection.devices) {
         for (const searchType of selection.searchTypes) {
           const tag = buildDataForSeoTag(project.clientId, project.id, run.id, searchType, device);
-          const task = buildTask(keyword.phrase, location, device, searchType, mode, tag);
+          const task = buildDataForSeoTask(keyword.phrase, project.domain, location, device, searchType, mode, livePageLimit, tag);
           const endpoint = `/v3/serp/google/${searchType}/live/advanced`;
           let apiRequestId: string | undefined;
 
@@ -207,8 +217,9 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
   return run.id;
 }
 
-function buildTask(
+export function buildDataForSeoTask(
   keyword: string,
+  targetDomain: string,
   location: {
     name: string;
     dataForSeoLocationName: string | null;
@@ -219,6 +230,7 @@ function buildTask(
   device: Device,
   searchType: SearchType,
   mode: DataForSeoMode,
+  livePageLimit: number,
   tag: string
 ): DataForSeoTask {
   const locationInput = location.dataForSeoLocationName
@@ -227,13 +239,27 @@ function buildTask(
       ? { location_coordinate: `${location.latitude},${location.longitude},${location.radiusMeters ?? 5000}` }
       : { location_name: location.name };
 
+  const organicCrawlOptions = mode === "live" && searchType === "organic"
+    ? {
+        depth: livePageLimit * 10,
+        max_crawl_pages: livePageLimit,
+        stop_crawl_on_match: [
+          {
+            match_value: normalizeMatchDomain(targetDomain),
+            match_type: "with_subdomains" as const
+          }
+        ],
+        find_targets_in: ["organic"]
+      }
+    : { depth: getDepth(searchType, device, mode) };
+
   return {
     keyword,
     ...locationInput,
     language_code: "en",
     device,
     os: device === "mobile" ? "android" : "windows",
-    depth: getDepth(searchType, device, mode),
+    ...organicCrawlOptions,
     tag
   };
 }
@@ -247,6 +273,14 @@ function getDepth(searchType: SearchType, device: Device, mode: DataForSeoMode) 
 
 function hasCostMultiplyingOperator(keyword: string) {
   return /(^|\s)-?(allinanchor|allintext|allintitle|allinurl|cache|define|definition|filetype|inanchor|info|intext|intitle|inurl|link|site):/i.test(keyword);
+}
+
+function normalizeMatchDomain(domain: string) {
+  try {
+    return new URL(domain.includes("://") ? domain : `https://${domain}`).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return domain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase();
+  }
 }
 
 async function findPreviousResult(keywordId: string, locationId: string, searchType: SearchType, device: Device) {

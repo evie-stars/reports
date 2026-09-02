@@ -25,9 +25,9 @@ The sandbox action always calls the DataForSEO sandbox host and cannot be promot
 
 ## Single Live Verification
 
-The project page also includes a one-task live verification control. It remains disabled unless `DATAFORSEO_LIVE_ENABLED=true`, requires an explicit paid-request confirmation, and accepts exactly one keyword, location, device, and result type. Search operators that can multiply the DataForSEO charge are blocked for this initial test.
+The project page also includes a one-task live verification control. It remains disabled unless `DATAFORSEO_LIVE_ENABLED=true`, requires an explicit paid-request confirmation, and accepts exactly one keyword, location, device, and result type. Organic checks can be capped between one and ten result pages; the request uses DataForSEO's stop-on-match option so crawling can finish as soon as the target domain is found. Search operators that can multiply the DataForSEO charge are blocked for this initial test.
 
-The interface shows DataForSEO's current `$0.002` Live SERP base price. The exact cost returned by DataForSEO is stored on the run and API audit records.
+The interface calculates the maximum base cost from DataForSEO's current `$0.002` per-page Live SERP price. The exact cost returned by DataForSEO is stored on the run and API audit records.
 
 ## Local Setup
 
