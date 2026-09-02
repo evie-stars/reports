@@ -42,6 +42,18 @@ https://reports.starwebsites.co.uk/api/auth/callback/google
 
 Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access; other approved accounts receive the sales role. A verified Google email must still match the allowlist. Client share URLs remain read-only bearer links and do not require a Google account.
 
+## Security Backlog
+
+Return to these items before broader client access or adding GA4 and Google Search Console data:
+
+2. Harden read-only client links with expiry dates, token regeneration, revocation, and optional client-email authentication.
+3. Set an explicit short session lifetime, initially 8-12 hours, and review session revocation behaviour.
+4. Add and verify production security headers, including HSTS, Content Security Policy, frame protection, and a strict referrer policy.
+5. Add audit logging for successful and failed sign-ins, report changes, paid API runs, role-sensitive actions, and share-link changes.
+6. Add rate limits to sensitive server actions and API endpoints, in addition to the existing report queue and worker pacing.
+7. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
+10. Complete a focused application and infrastructure security review before connecting GA4 or Google Search Console accounts.
+
 ## Local Setup
 
 1. Install dependencies:
