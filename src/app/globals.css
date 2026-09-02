@@ -49,7 +49,9 @@ a {
 .app-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -61,13 +63,12 @@ a {
     radial-gradient(110% 48% at 100% 100%, rgba(80, 167, 117, 0.26) 0%, rgba(80, 167, 117, 0) 72%),
     linear-gradient(160deg, #1e232d 0%, #1c2731 54%, #1e232d 100%);
   color: white;
-  align-self: start;
+  align-self: stretch;
   height: 100vh;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   padding: 26px 18px;
-  position: sticky;
-  top: 0;
+  position: relative;
   isolation: isolate;
 }
 
@@ -135,6 +136,12 @@ main {
   min-width: 0;
   padding: 22px 34px 42px;
   width: 100%;
+}
+
+.app-shell > main {
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .topbar {
@@ -1398,8 +1405,11 @@ main {
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
     max-width: 100%;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .sidebar {
@@ -1407,6 +1417,11 @@ main {
     min-width: 0;
     position: static;
     padding: 20px;
+  }
+
+  .app-shell > main {
+    height: auto;
+    overflow-y: visible;
   }
 
   .sidebar nav {
