@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { currentActor } from "@/lib/access";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  await currentActor();
   const data = await getDashboardData();
   return (
     <>

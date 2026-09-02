@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
+import { currentActor } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function RunDetailPage({ params }: { params: Promise<{ runId: string }> }) {
+  await currentActor();
   const { runId } = await params;
   const run = await prisma.rankRun.findUnique({
     where: { id: runId },

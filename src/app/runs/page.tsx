@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/db";
+import { currentActor } from "@/lib/access";
 import { Icon } from "@/components/icon";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function RunsPage() {
+  await currentActor();
   const { runs, dbUnavailable } = await getRunsData();
 
   return (

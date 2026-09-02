@@ -1,4 +1,5 @@
 import { auth, type AppRole } from "../../auth";
+import { redirect } from "next/navigation";
 
 export type CurrentActor = {
   email: string;
@@ -16,7 +17,7 @@ export async function currentActor(): Promise<CurrentActor> {
   }
 
   const session = await auth();
-  if (!session?.user?.email) throw new Error("You must sign in to continue.");
+  if (!session?.user?.email) redirect("/login");
   return {
     email: session.user.email.toLowerCase(),
     name: session.user.name ?? null,
