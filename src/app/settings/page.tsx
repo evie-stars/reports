@@ -1,3 +1,5 @@
+import { Icon } from "@/components/icon";
+
 export default function SettingsPage() {
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
@@ -14,7 +16,7 @@ export default function SettingsPage() {
 
       <section className="grid two">
         <div className="card">
-          <p className="label">DataForSEO</p>
+          <p className="label label-with-icon"><Icon name="settings" />DataForSEO</p>
           <table className="table">
             <tbody>
               <tr>
@@ -34,7 +36,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="card">
-          <p className="label">Next Integrations</p>
+          <p className="label label-with-icon"><Icon name="graph" />Next Integrations</p>
           <h3>GA4 and GSC placeholders</h3>
           <p className="muted">
             The database includes snapshot tables for Google Analytics and Google Search Console. We can add OAuth/import jobs after rank tracking is stable.

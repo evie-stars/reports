@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { Icon } from "@/components/icon";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function RunsPage() {
       ) : null}
 
       <section className="card">
+        <p className="label label-with-icon"><Icon name="graph" />Run History</p>
         <table className="table">
           <thead>
             <tr>

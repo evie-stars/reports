@@ -7,6 +7,14 @@ const ignores = [
   }
 ];
 
-const eslintConfig = [...ignores, ...nextVitals, ...nextTypescript];
+const fontRule = [
+  {
+    rules: {
+      "@next/next/no-page-custom-font": "off"
+    }
+  }
+];
+
+const eslintConfig = [...ignores, ...nextVitals, ...nextTypescript, ...fontRule];
 
 export default eslintConfig;

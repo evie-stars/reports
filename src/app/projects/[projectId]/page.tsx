@@ -7,6 +7,7 @@ import {
   updateLocationActive,
   updateProject
 } from "@/app/actions";
+import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
-          <p className="label">Project Details</p>
+          <p className="label label-with-icon"><Icon name="home" />Project Details</p>
           <input type="hidden" name="clientId" value={project.clientId} />
           <label>
             Project name
@@ -63,7 +64,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         </form>
 
         <div className="card">
-          <p className="label">Tracking Summary</p>
+          <p className="label label-with-icon"><Icon name="graph" />Tracking Summary</p>
           <div className="summary-list">
             <span><strong>{project.keywords.filter((keyword) => keyword.active).length}</strong> active keywords</span>
             <span><strong>{project.locations.filter((location) => location.active).length}</strong> active locations</span>
@@ -74,7 +75,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <section className="grid two" style={{ marginTop: 18 }}>
         <form className="card form" action={createKeywords}>
-          <p className="label">Add Keywords</p>
+          <p className="label label-with-icon"><Icon name="tags" />Add Keywords</p>
           <input type="hidden" name="projectId" value={project.id} />
           <label>
             Keywords
@@ -97,7 +98,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         </form>
 
         <form className="card form" action={createLocation}>
-          <p className="label">Add Location</p>
+          <p className="label label-with-icon"><Icon name="location" />Add Location</p>
           <input type="hidden" name="projectId" value={project.id} />
           <label>
             Location name
@@ -135,7 +136,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="card" style={{ marginTop: 18 }}>
-        <p className="label">Recent Runs</p>
+        <p className="label label-with-icon"><Icon name="graph" />Recent Runs</p>
         <table className="table">
           <thead>
             <tr>
@@ -187,7 +188,7 @@ type Location = {
 function KeywordTable({ projectId, keywords }: { projectId: string; keywords: Keyword[] }) {
   return (
     <div className="card">
-      <p className="label">Keywords</p>
+      <p className="label label-with-icon"><Icon name="tags" />Keywords</p>
       <table className="table">
         <thead>
           <tr>
@@ -227,7 +228,7 @@ function KeywordTable({ projectId, keywords }: { projectId: string; keywords: Ke
 function LocationTable({ projectId, locations }: { projectId: string; locations: Location[] }) {
   return (
     <div className="card">
-      <p className="label">Locations</p>
+      <p className="label label-with-icon"><Icon name="location" />Locations</p>
       <table className="table">
         <thead>
           <tr>

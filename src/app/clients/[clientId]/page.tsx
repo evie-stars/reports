@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createProject, updateClient } from "@/app/actions";
+import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ c
 
       <section className="grid two">
         <form className="card form" action={updateClientWithId}>
-          <p className="label">Client Details</p>
+          <p className="label label-with-icon"><Icon name="contacts" />Client Details</p>
           <label>
             Client name
             <input name="name" required defaultValue={client.name} />
@@ -50,7 +51,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ c
         </form>
 
         <form className="card form" action={createProject}>
-          <p className="label">New Project</p>
+          <p className="label label-with-icon"><Icon name="home" />New Project</p>
           <input type="hidden" name="clientId" value={client.id} />
           <label>
             Project name
@@ -73,7 +74,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ c
       </section>
 
       <section className="card" style={{ marginTop: 18 }}>
-        <p className="label">Projects</p>
+        <p className="label label-with-icon"><Icon name="graph" />Projects</p>
         <table className="table">
           <thead>
             <tr>

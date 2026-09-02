@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
 import { createClient } from "@/app/actions";
+import { Icon } from "@/components/icon";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function ClientsPage() {
 
       <section className="grid two">
         <form className="card form" action={createClient}>
-          <p className="label">New Client</p>
+          <p className="label label-with-icon"><Icon name="contacts" />New Client</p>
           <label>
             Client name
             <input name="name" required placeholder="Star Websites" />
@@ -38,7 +39,7 @@ export default async function ClientsPage() {
         </form>
 
         <div className="card">
-          <p className="label">Setup Flow</p>
+          <p className="label label-with-icon"><Icon name="graph" />Setup Flow</p>
           <h3>Client, project, keywords, locations</h3>
           <p className="muted">Create a client first, then add one or more projects. Each project gets its own tracked keywords and search locations.</p>
         </div>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Icon } from "@/components/icon";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,6 +11,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+      </head>
       <body>
         <div className="app-shell">
           <aside className="sidebar">
@@ -19,10 +25,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <h1>Local SEO Hub</h1>
             </div>
             <nav>
-              <Link href="/">Dashboard</Link>
-              <Link href="/clients">Clients</Link>
-              <Link href="/runs">Rank Runs</Link>
-              <Link href="/settings">Settings</Link>
+              <Link href="/"><Icon name="home" />Dashboard</Link>
+              <Link href="/clients"><Icon name="contacts" />Clients</Link>
+              <Link href="/runs"><Icon name="graph" />Rank Runs</Link>
+              <Link href="/settings"><Icon name="settings" />Settings</Link>
             </nav>
           </aside>
           <main>

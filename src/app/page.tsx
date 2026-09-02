@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
+import { Icon } from "@/components/icon";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,10 @@ export default async function DashboardPage() {
       {data.dbUnavailable ? <SetupNotice /> : null}
 
       <section className="grid metrics">
-        <Metric label="Clients" value={data.clients} hint="Accounts being tracked" />
-        <Metric label="Projects" value={data.projects} hint="Sites or locations" />
-        <Metric label="Active Keywords" value={data.keywords} hint="Included in checks" />
-        <Metric label="Tracked Locations" value={data.locations} hint="Local SERP markets" />
+        <Metric icon="contacts" label="Clients" value={data.clients} hint="Accounts being tracked" />
+        <Metric icon="home" label="Projects" value={data.projects} hint="Sites or locations" />
+        <Metric icon="tags" label="Active Keywords" value={data.keywords} hint="Included in checks" />
+        <Metric icon="location" label="Tracked Locations" value={data.locations} hint="Local SERP markets" />
       </section>
 
       <section className="grid two" style={{ marginTop: 18 }}>
@@ -101,10 +102,13 @@ function SetupNotice() {
   );
 }
 
-function Metric({ label, value, hint }: { label: string; value: number; hint: string }) {
+function Metric({ icon, label, value, hint }: { icon: "contacts" | "home" | "location" | "tags"; label: string; value: number; hint: string }) {
   return (
     <div className="card metric-card">
-      <p className="label">{label}</p>
+      <div className="metric-topline">
+        <p className="label">{label}</p>
+        <span className="icon-tile"><Icon name={icon} /></span>
+      </div>
       <p className="metric-value">{value}</p>
       <p className="metric-hint">{hint}</p>
     </div>
