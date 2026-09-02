@@ -19,10 +19,10 @@ export default async function DashboardPage() {
       {data.dbUnavailable ? <SetupNotice /> : null}
 
       <section className="grid metrics">
-        <Metric label="Clients" value={data.clients} />
-        <Metric label="Projects" value={data.projects} />
-        <Metric label="Active Keywords" value={data.keywords} />
-        <Metric label="Tracked Locations" value={data.locations} />
+        <Metric label="Clients" value={data.clients} hint="Accounts being tracked" />
+        <Metric label="Projects" value={data.projects} hint="Sites or locations" />
+        <Metric label="Active Keywords" value={data.keywords} hint="Included in checks" />
+        <Metric label="Tracked Locations" value={data.locations} hint="Local SERP markets" />
       </section>
 
       <section className="grid two" style={{ marginTop: 18 }}>
@@ -61,6 +61,11 @@ export default async function DashboardPage() {
           <p className="muted">
             Live API calls are blocked unless `DATAFORSEO_LIVE_ENABLED=true` is set. Keep the first real test to one task while the trial credit is limited.
           </p>
+          <div className="check-list">
+            <span>Sandbox mode enabled by default</span>
+            <span>Live runs capped to one task</span>
+            <span>API requests logged with project tags</span>
+          </div>
         </div>
       </section>
     </>
@@ -96,11 +101,12 @@ function SetupNotice() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
-    <div className="card">
+    <div className="card metric-card">
       <p className="label">{label}</p>
       <p className="metric-value">{value}</p>
+      <p className="metric-hint">{hint}</p>
     </div>
   );
 }

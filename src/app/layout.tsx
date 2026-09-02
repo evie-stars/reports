@@ -13,7 +13,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <div className="app-shell">
           <aside className="sidebar">
-            <div>
+            <div className="brand-block">
+              <div className="brand-mark">SR</div>
               <p className="eyebrow">Star Reports</p>
               <h1>Local SEO Hub</h1>
             </div>
@@ -24,7 +25,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link href="/settings">Settings</Link>
             </nav>
           </aside>
-          <main>{children}</main>
+          <main>
+            <div className="topbar">
+              <span>reports.starwebsites.co.uk</span>
+              <span className="status good">Sandbox protected</span>
+            </div>
+            {children}
+          </main>
         </div>
       </body>
     </html>

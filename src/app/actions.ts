@@ -27,6 +27,13 @@ const keywordSchema = z.object({
   targetUrl: optionalText
 });
 
+const bulkKeywordSchema = z.object({
+  projectId: z.string().trim().min(1),
+  phrases: z.string().trim().min(1, "Add at least one keyword."),
+  group: optionalText,
+  targetUrl: optionalText
+});
+
 const optionalNumber = z.preprocess((value) => {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return undefined;
@@ -89,6 +96,22 @@ export async function createKeyword(formData: FormData) {
   revalidatePath(`/projects/${data.projectId}`);
 }
 
+export async function createKeywords(formData: FormData) {
+  const data = bulkKeywordSchema.parse(readForm(formData, ["projectId", "phrases", "group", "targetUrl"]));
+  const phrases = uniqueLines(data.phrases);
+
+  await prisma.keyword.createMany({
+    data: phrases.map((phrase) => ({
+      projectId: data.projectId,
+      phrase,
+      group: data.group,
+      targetUrl: data.targetUrl
+    }))
+  });
+
+  revalidatePath(`/projects/${data.projectId}`);
+}
+
 export async function updateKeywordActive(keywordId: string, projectId: string, active: boolean) {
   await prisma.keyword.update({ where: { id: keywordId }, data: { active } });
   revalidatePath(`/projects/${projectId}`);
@@ -130,4 +153,15 @@ function readForm(formData: FormData, keys: string[]) {
 
 function stringFromForm(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value : "";
+}
+
+function uniqueLines(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    )
+  );
 }

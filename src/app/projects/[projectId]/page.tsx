@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  createKeyword,
+  createKeywords,
   createLocation,
   updateKeywordActive,
   updateLocationActive,
@@ -73,22 +73,27 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="grid two" style={{ marginTop: 18 }}>
-        <form className="card form" action={createKeyword}>
-          <p className="label">Add Keyword</p>
+        <form className="card form" action={createKeywords}>
+          <p className="label">Add Keywords</p>
           <input type="hidden" name="projectId" value={project.id} />
           <label>
-            Keyword
-            <input name="phrase" required placeholder="emergency plumber manchester" />
+            Keywords
+            <textarea
+              name="phrases"
+              required
+              rows={7}
+              placeholder={"emergency plumber manchester\nboiler repair manchester\nlocal plumber near me"}
+            />
           </label>
           <label>
-            Group
+            Group for all keywords
             <input name="group" placeholder="Emergency" />
           </label>
           <label>
-            Target URL
+            Target URL for all keywords
             <input name="targetUrl" placeholder="https://example.co.uk/service" />
           </label>
-          <button className="button" type="submit">Add Keyword</button>
+          <button className="button" type="submit">Add Keywords</button>
         </form>
 
         <form className="card form" action={createLocation}>
