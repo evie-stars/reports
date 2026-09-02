@@ -333,15 +333,17 @@ main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
+  min-height: 36px;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--light-blue);
   color: white;
   cursor: pointer;
-  padding: 0 16px;
-  font-weight: 700;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 500;
   transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+  white-space: nowrap;
 }
 
 .button:hover {
