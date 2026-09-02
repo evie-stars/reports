@@ -163,8 +163,8 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
                 previousRank,
                 ...(matchedItem ? { rawItem: matchedItem.rawItem as Prisma.InputJsonValue } : {}),
                 serpFeatures: {
-                  create: getSerpFeatures(parsedItems, searchType).map((item) => ({
-                    type: item.type,
+                  create: getStoredItems(parsedItems, matchedItem, searchType).map((item) => ({
+                    type: item.storedType,
                     title: item.title,
                     url: item.url,
                     rankGroup: item.rankGroup,
@@ -297,9 +297,15 @@ function bestMatchedItem(items: ParsedRankItem[]) {
     .sort((a, b) => (a.rankAbsolute ?? a.rankGroup ?? Number.MAX_SAFE_INTEGER) - (b.rankAbsolute ?? b.rankGroup ?? Number.MAX_SAFE_INTEGER))[0];
 }
 
-function getSerpFeatures(items: ParsedRankItem[], searchType: SearchType) {
-  if (searchType !== "organic") return [];
-  return items.filter((item) => item.type !== "organic").slice(0, 50);
+function getStoredItems(items: ParsedRankItem[], bestMatch: ParsedRankItem | undefined, searchType: SearchType) {
+  const serpFeatures = searchType === "organic"
+    ? items.filter((item) => item.type !== "organic").map((item) => ({ ...item, storedType: item.type }))
+    : [];
+  const additionalTargets = items
+    .filter((item) => item.matched && item.url && item.url !== bestMatch?.url)
+    .map((item) => ({ ...item, storedType: "target_match" }));
+
+  return [...serpFeatures, ...additionalTargets].slice(0, 50);
 }
 
 function getDirection(currentRank: number | null, previousRank: number | null): RankDirection | null {

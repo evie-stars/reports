@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -73,6 +74,26 @@ export async function updateClient(clientId: string, formData: FormData) {
   await prisma.client.update({ where: { id: clientId }, data });
 
   revalidatePath("/clients");
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function enableClientShare(clientId: string) {
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { shareToken: true } });
+  if (!client) throw new Error("Client not found.");
+
+  await prisma.client.update({
+    where: { id: clientId },
+    data: {
+      shareEnabled: true,
+      shareToken: client.shareToken ?? randomBytes(24).toString("base64url")
+    }
+  });
+
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function disableClientShare(clientId: string) {
+  await prisma.client.update({ where: { id: clientId }, data: { shareEnabled: false } });
   revalidatePath(`/clients/${clientId}`);
 }
 
