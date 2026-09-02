@@ -9,6 +9,8 @@ export type ReportSearchParams = {
   type?: string;
   group?: string;
   keyword?: string;
+  sort?: string;
+  dir?: string;
 };
 
 export type ReportFilters = {
@@ -19,6 +21,8 @@ export type ReportFilters = {
   searchType?: SearchType;
   group?: string;
   keywordId?: string;
+  sort: "keyword" | "area" | "current";
+  sortDirection: "asc" | "desc";
 };
 
 export async function getClientReportData(clientId: string, searchParams: ReportSearchParams) {
@@ -77,14 +81,10 @@ export async function getClientReportData(clientId: string, searchParams: Report
     histories.set(key, history);
   }
 
-  const latestResults = Array.from(histories.values())
-    .map((history) => enrichResult(history[0], history[1]))
-    .sort((a, b) => {
-      const projectOrder = a.run.project.name.localeCompare(b.run.project.name);
-      return projectOrder || a.keyword.phrase.localeCompare(b.keyword.phrase) || a.location.name.localeCompare(b.location.name);
-    });
+  const latestResults = Array.from(histories.values()).map((history) => enrichResult(history[0], history[1]));
 
   markMultipleCurrentUrls(latestResults);
+  sortCurrentResults(latestResults, filters);
 
   const keywordHistory = filters.keywordId
     ? descendingResults
@@ -149,7 +149,9 @@ function normalizeFilters(params: ReportSearchParams): ReportFilters {
     device: params.device === "desktop" || params.device === "mobile" ? params.device : undefined,
     searchType: params.type === "organic" || params.type === "local_finder" || params.type === "maps" ? params.type : undefined,
     group: clean(params.group),
-    keywordId: clean(params.keyword)
+    keywordId: clean(params.keyword),
+    sort: params.sort === "area" || params.sort === "current" ? params.sort : "keyword",
+    sortDirection: params.dir === "desc" ? "desc" : "asc"
   };
 }
 
@@ -200,6 +202,23 @@ function markMultipleCurrentUrls(results: Array<ReturnType<typeof enrichResult<R
   }
 }
 
+function sortCurrentResults(results: Array<ReturnType<typeof enrichResult<ResultShape>>>, filters: ReportFilters) {
+  const direction = filters.sortDirection === "asc" ? 1 : -1;
+  results.sort((left, right) => {
+    let comparison = 0;
+    if (filters.sort === "area") comparison = left.location.name.localeCompare(right.location.name);
+    if (filters.sort === "keyword") comparison = left.keyword.phrase.localeCompare(right.keyword.phrase);
+    if (filters.sort === "current") {
+      if (left.rank === null && right.rank !== null) return 1;
+      if (left.rank !== null && right.rank === null) return -1;
+      comparison = (left.rank ?? 0) - (right.rank ?? 0);
+    }
+
+    if (comparison !== 0) return comparison * direction;
+    return left.keyword.phrase.localeCompare(right.keyword.phrase) || left.location.name.localeCompare(right.location.name);
+  });
+}
+
 function buildStats(results: Array<{ keywordId: string; rank: number | null; direction: string | null; issues: string[] }>, activeKeywords: number) {
   const topThree = new Set<string>();
   const pageOne = new Set<string>();
@@ -236,7 +255,10 @@ function buildTrend(resultsDescending: ResultShape[], period: ReportFilters["per
     days.set(day, entries);
   }
 
-  const cutoff = period === "all" ? null : new Date(Date.now() - Number(period) * 24 * 60 * 60 * 1000);
+  const latestCheck = resultsDescending[0]?.checkedAt;
+  const cutoff = period === "all" || !latestCheck
+    ? null
+    : new Date(latestCheck.getTime() - Number(period) * 24 * 60 * 60 * 1000);
   const current = new Map<string, ResultShape>();
   const points: Array<{ date: string; label: string; pageOne: number; topThree: number; averageRank: number | null }> = [];
 

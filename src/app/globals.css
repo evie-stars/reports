@@ -1222,8 +1222,20 @@ main {
 
 .comparison-table th,
 .comparison-table td {
-  padding-bottom: 12px;
-  padding-top: 12px;
+  padding: 8px 7px;
+}
+
+.comparison-table {
+  font-size: 12px;
+}
+
+.comparison-table th {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.comparison-table .result-url {
+  max-width: 190px;
 }
 
 .comparison-table tbody tr {
@@ -1241,6 +1253,7 @@ main {
 
 .keyword-history-link {
   color: var(--text) !important;
+  font-size: 12px;
   font-weight: 600 !important;
 }
 
@@ -1252,8 +1265,8 @@ main {
 .row-context {
   color: var(--muted);
   display: block;
-  font-size: 10px;
-  margin-top: 3px;
+  font-size: 9px;
+  margin-top: 2px;
   white-space: nowrap;
 }
 
@@ -1262,11 +1275,36 @@ main {
   background: var(--surface-strong);
   border-radius: 5px;
   display: inline-flex;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
-  height: 30px;
+  height: 25px;
   justify-content: center;
-  min-width: 34px;
+  min-width: 29px;
+}
+
+.comparison-table .change-label,
+.comparison-table .issue-list span {
+  font-size: 9px;
+  padding: 3px 6px;
+}
+
+.sort-header {
+  align-items: center;
+  color: var(--muted) !important;
+  display: inline-flex;
+  font-weight: 700 !important;
+  gap: 4px;
+}
+
+.sort-header:hover,
+.sort-header.active {
+  color: var(--accent-strong) !important;
+}
+
+.sort-indicator {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
 }
 
 .rank-highlight.up,

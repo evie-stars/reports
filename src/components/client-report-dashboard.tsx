@@ -37,7 +37,7 @@ export function ClientReportDashboard({
           <div className="movement-summary" aria-label="Latest movement summary">
             <span className="movement-count up">{stats.improved} improved</span>
             <span className="movement-count new">{stats.newRankings} new</span>
-            <span className="movement-count down">{stats.declined} declined</span>
+            <span className="movement-count down">{stats.declined} dropped</span>
             {stats.issues ? <span className="movement-count issue">{stats.issues} URL flags</span> : null}
           </div>
         </div>
@@ -45,6 +45,8 @@ export function ClientReportDashboard({
       </section>
 
       <form className="report-filters spaced-section" action={basePath} method="get">
+        <input type="hidden" name="sort" value={filters.sort} />
+        <input type="hidden" name="dir" value={filters.sortDirection} />
         <FilterSelect label="Period" name="period" value={filters.period}>
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
@@ -94,10 +96,10 @@ export function ClientReportDashboard({
           <table className="table comparison-table">
             <thead>
               <tr>
-                <th>Keyword</th>
-                <th>Area</th>
+                <SortableHeader basePath={basePath} column="keyword" filters={filters} label="Keyword" />
+                <SortableHeader basePath={basePath} column="area" filters={filters} label="Area" />
                 <th>Result</th>
-                <th>Current</th>
+                <SortableHeader basePath={basePath} column="current" filters={filters} label="Current" />
                 <th>Previous</th>
                 <th>Change</th>
                 <th>Ranked URL</th>
@@ -129,6 +131,30 @@ export function ClientReportDashboard({
         />
       ) : null}
     </>
+  );
+}
+
+function SortableHeader({
+  basePath,
+  column,
+  filters,
+  label
+}: {
+  basePath: string;
+  column: ClientReportData["filters"]["sort"];
+  filters: ClientReportData["filters"];
+  label: string;
+}) {
+  const active = filters.sort === column;
+  const nextDirection = active && filters.sortDirection === "asc" ? "desc" : "asc";
+  const href = reportHref(basePath, { ...filters, sort: column, sortDirection: nextDirection });
+  const indicator = active ? (filters.sortDirection === "asc" ? "↑" : "↓") : "↕";
+  return (
+    <th scope="col" aria-sort={active ? (filters.sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+      <Link className={`sort-header${active ? " active" : ""}`} href={href} scroll={false} title={`Sort ${label.toLowerCase()} ${nextDirection === "asc" ? "ascending" : "descending"}`}>
+        {label}<span className="sort-indicator" aria-hidden="true">{indicator}</span>
+      </Link>
+    </th>
   );
 }
 
@@ -187,7 +213,7 @@ function Movement({ result }: { result: CurrentReportResult }) {
 
 function PageOneTrendChart({ points }: { points: ClientReportData["trend"] }) {
   if (points.length < 2) {
-    return <div className="chart-empty">A progress chart will appear after at least two live check dates.</div>;
+    return <div className="chart-empty">A progress chart will appear after at least two check dates in this period.</div>;
   }
 
   const width = 900;
@@ -298,6 +324,8 @@ function reportHref(basePath: string, filters: ClientReportData["filters"], keyw
   if (filters.device) params.set("device", filters.device);
   if (filters.searchType) params.set("type", filters.searchType);
   if (filters.group) params.set("group", filters.group);
+  if (filters.sort !== "keyword") params.set("sort", filters.sort);
+  if (filters.sortDirection !== "asc") params.set("dir", filters.sortDirection);
   if (keywordId) params.set("keyword", keywordId);
   const query = params.toString();
   return query ? `${basePath}?${query}` : basePath;
