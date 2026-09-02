@@ -12,13 +12,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         clientSecret: process.env.AUTH_GOOGLE_SECRET ?? ""
       })]
     : [],
-  pages: { signIn: "/login" },
+  pages: { signIn: "/login", error: "/login" },
   session: { strategy: "jwt" },
   callbacks: {
-    signIn({ profile }) {
-      const email = typeof profile?.email === "string" ? profile.email.toLowerCase() : "";
-      const verified = (profile as { email_verified?: boolean } | undefined)?.email_verified === true;
-      return verified && emailAllowed(email);
+    signIn({ user, account, profile }) {
+      if (account?.provider !== "google") return false;
+
+      const googleProfile = profile as { email?: string; email_verified?: boolean } | undefined;
+      const email = (googleProfile?.email ?? user.email ?? "").toLowerCase();
+      const verified = googleProfile?.email_verified !== false;
+      const allowed = verified && emailAllowed(email);
+
+      if (!allowed) {
+        console.warn("[auth] Google sign-in rejected", {
+          email,
+          verified,
+          allowedDomainsConfigured: envList("AUTH_ALLOWED_DOMAINS").length > 0,
+          allowedEmailsConfigured: envList("AUTH_ALLOWED_EMAILS").length > 0
+        });
+      }
+
+      return allowed;
     },
     jwt({ token }) {
       if (token.email) token.role = roleForEmail(token.email);
