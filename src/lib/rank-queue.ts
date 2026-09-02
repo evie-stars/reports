@@ -3,8 +3,10 @@ import { Device, Prisma, RankRunSource, SearchType } from "@prisma/client";
 import { z } from "zod";
 import type { AppRole } from "../../auth";
 import { DataForSeoClient } from "@/lib/dataforseo";
+import { assertBudgetAvailable, estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { executeQueuedRankRun, type RankRunSelection } from "@/lib/rank-runner";
+import { collectStandardRankRuns, submitStandardRankRun } from "@/lib/rank-standard";
 
 const queueSelectionSchema = z.object({
   projectId: z.string().min(1),
@@ -55,21 +57,45 @@ export async function enqueueProjectRerun(input: {
 async function enqueueSelection(selection: QueueSelection, source: RankRunSource, requestedByEmail: string | null) {
   const parsed = queueSelectionSchema.parse(selection);
   const requestedTasks = parsed.keywordIds.length * parsed.locationIds.length * parsed.devices.length * parsed.searchTypes.length;
-  new DataForSeoClient().assertSafeToRun("live", requestedTasks);
+  const deliveryMethod = source === "verification" ? "live" : "standard";
+  const client = new DataForSeoClient();
+  if (deliveryMethod === "live") client.assertSafeToRun("live", requestedTasks);
+  else client.assertStandardTaskCount(requestedTasks);
+  const estimatedCostUsd = estimateRankRunCost({
+    keywordCount: parsed.keywordIds.length,
+    locationCount: parsed.locationIds.length,
+    devices: parsed.devices,
+    searchTypes: parsed.searchTypes,
+    pageLimit: parsed.pageLimit
+  }, deliveryMethod);
 
-  const run = await prisma.rankRun.create({
-    data: {
-      projectId: parsed.projectId,
-      status: "queued",
-      sandbox: false,
-      source,
-      requestedByEmail,
-      requestedTasks,
-      selection: parsed as Prisma.InputJsonValue,
-      notes: `${readableSource(source)} queued: ${requestedTasks} task(s), up to ${parsed.pageLimit} organic result page(s).`
-    }
+  const run = await prisma.$transaction(async (tx) => {
+    await assertBudgetAvailable(estimatedCostUsd, tx);
+    return tx.rankRun.create({
+      data: {
+        projectId: parsed.projectId,
+        status: "queued",
+        sandbox: false,
+        source,
+        deliveryMethod,
+        requestedByEmail,
+        requestedTasks,
+        estimatedCostUsd,
+        selection: parsed as Prisma.InputJsonValue,
+        notes: `${readableSource(source)} queued via ${deliveryMethod}: ${requestedTasks} task(s), up to ${parsed.pageLimit} organic result page(s).`
+      }
+    });
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable
   });
   return run.id;
+}
+
+export async function retryRankRun(runId: string, requestedByEmail: string) {
+  const run = await prisma.rankRun.findUnique({ where: { id: runId } });
+  if (!run || !["failed", "blocked"].includes(run.status)) throw new Error("Only failed or blocked reports can be retried.");
+  const selection = queueSelectionSchema.parse(run.selection);
+  return enqueueSelection(selection, run.source === "scheduled" ? "scheduled" : "manual", requestedByEmail);
 }
 
 export async function enqueueDueSchedules(now = new Date()) {
@@ -89,15 +115,26 @@ export async function enqueueDueSchedules(now = new Date()) {
     });
     if (existing || project.keywords.length === 0 || project.locations.length === 0) continue;
 
+    const selection = {
+      projectId: project.id,
+      keywordIds: project.keywords.map(({ id }) => id),
+      locationIds: project.locations.map(({ id }) => id),
+      devices: project.scheduleDevices,
+      searchTypes: project.scheduleSearchTypes,
+      pageLimit: project.schedulePageLimit
+    };
+    const requestedTasks = selection.keywordIds.length * selection.locationIds.length *
+      selection.devices.length * selection.searchTypes.length;
+    const estimatedCostUsd = estimateRankRunCost({
+      keywordCount: selection.keywordIds.length,
+      locationCount: selection.locationIds.length,
+      devices: selection.devices,
+      searchTypes: selection.searchTypes,
+      pageLimit: selection.pageLimit
+    }, "standard");
+
     try {
-      await enqueueSelection({
-        projectId: project.id,
-        keywordIds: project.keywords.map(({ id }) => id),
-        locationIds: project.locations.map(({ id }) => id),
-        devices: project.scheduleDevices,
-        searchTypes: project.scheduleSearchTypes,
-        pageLimit: project.schedulePageLimit
-      }, "scheduled", "scheduler");
+      await enqueueSelection(selection, "scheduled", "scheduler");
       queued += 1;
     } catch (error) {
       await prisma.rankRun.create({
@@ -106,6 +143,12 @@ export async function enqueueDueSchedules(now = new Date()) {
           status: "blocked",
           sandbox: false,
           source: "scheduled",
+          deliveryMethod: "standard",
+          requestedByEmail: "scheduler",
+          requestedTasks,
+          estimatedCostUsd,
+          selection: selection as Prisma.InputJsonValue,
+          lastError: errorMessage(error),
           notes: `Monthly schedule blocked: ${errorMessage(error)}`
         }
       });
@@ -118,8 +161,10 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
   const owner = randomUUID();
   if (!(await acquireWorkerLock(owner))) return { processed: 0, locked: true };
   let processed = 0;
+  let collected = 0;
 
   try {
+    collected = await collectStandardRankRuns();
     while (processed < maxJobs) {
       const candidate = await prisma.rankRun.findFirst({
         where: { status: "queued", sandbox: false, availableAt: { lte: new Date() } },
@@ -135,16 +180,25 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
 
       try {
         const selection = queueSelectionSchema.parse(candidate.selection);
-        await executeQueuedRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
+        if (candidate.source === "verification") {
+          await executeQueuedRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
+        } else {
+          await submitStandardRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
+        }
       } catch (error) {
         await prisma.rankRun.update({
           where: { id: candidate.id },
-          data: { status: "failed", completedAt: new Date(), notes: `${candidate.notes ?? "Queued report."} Failed: ${errorMessage(error)}` }
+          data: {
+            status: "failed",
+            completedAt: new Date(),
+            lastError: errorMessage(error),
+            notes: `${candidate.notes ?? "Queued report."} Failed: ${errorMessage(error)}`
+          }
         });
       }
       processed += 1;
     }
-    return { processed, locked: false };
+    return { processed, collected, locked: false };
   } finally {
     await releaseWorkerLock(owner);
   }

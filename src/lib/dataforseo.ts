@@ -5,7 +5,9 @@ const configSchema = z.object({
   DATAFORSEO_PASSWORD: z.string().optional(),
   DATAFORSEO_SANDBOX: z.string().default("true"),
   DATAFORSEO_LIVE_ENABLED: z.string().default("false"),
-  DATAFORSEO_MAX_LIVE_TASKS_PER_RUN: z.coerce.number().int().positive().default(1)
+  DATAFORSEO_MAX_LIVE_TASKS_PER_RUN: z.coerce.number().int().positive().default(1),
+  DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN: z.coerce.number().int().positive().default(1000),
+  DATAFORSEO_KEYWORD_METRICS_ENABLED: z.string().default("false")
 });
 
 export type DataForSeoTask = {
@@ -27,6 +29,16 @@ export type DataForSeoTask = {
 
 export type DataForSeoMode = "sandbox" | "live";
 
+export type DataForSeoApiResponse = {
+  endpoint: string;
+  sandbox: boolean;
+  requestBody: unknown;
+  responseBody: unknown;
+  statusCode: number;
+  tag?: string;
+  costUsd: number;
+};
+
 export type DataForSeoLocation = {
   locationCode: number;
   locationName: string;
@@ -42,14 +54,18 @@ export class DataForSeoClient {
   private readonly sandboxDefault: boolean;
   private readonly liveEnabled: boolean;
   private readonly maxLiveTasks: number;
+  private readonly maxStandardTasks: number;
+  private readonly keywordMetricsEnabled: boolean;
 
-  constructor(env = process.env) {
+  constructor(env: Record<string, string | undefined> = process.env) {
     const config = configSchema.parse(env);
     this.login = config.DATAFORSEO_LOGIN;
     this.password = config.DATAFORSEO_PASSWORD;
     this.sandboxDefault = config.DATAFORSEO_SANDBOX !== "false";
     this.liveEnabled = config.DATAFORSEO_LIVE_ENABLED === "true";
     this.maxLiveTasks = config.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN;
+    this.maxStandardTasks = config.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN;
+    this.keywordMetricsEnabled = config.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   }
 
   async postSerpTask(searchType: "organic" | "local_finder" | "maps", task: DataForSeoTask, mode?: DataForSeoMode) {
@@ -119,6 +135,63 @@ export class DataForSeoClient {
     return locations;
   }
 
+  async postStandardSerpTasks(
+    searchType: "organic" | "local_finder" | "maps",
+    tasks: DataForSeoTask[]
+  ): Promise<DataForSeoApiResponse> {
+    this.assertPaidEnabled();
+    this.assertStandardTaskCount(tasks.length);
+    const endpoint = `/v3/serp/google/${searchType}/task_post`;
+    return this.request(endpoint, { method: "POST", body: tasks });
+  }
+
+  async getStandardSerpTask(
+    searchType: "organic" | "local_finder" | "maps",
+    taskId: string
+  ): Promise<DataForSeoApiResponse> {
+    this.assertPaidEnabled();
+    const endpoint = `/v3/serp/google/${searchType}/task_get/advanced/${encodeURIComponent(taskId)}`;
+    return this.request(endpoint);
+  }
+
+  async getReadySerpTaskIds(searchType: "organic" | "local_finder" | "maps") {
+    this.assertPaidEnabled();
+    const endpoint = `/v3/serp/google/${searchType}/tasks_ready`;
+    const response = await this.request(endpoint);
+    return { ...response, taskIds: readReadyTaskIds(response.responseBody) };
+  }
+
+  async postKeywordMetricsTask(task: {
+    keywords: string[];
+    location_name: string;
+    language_code: string;
+    tag: string;
+  }): Promise<DataForSeoApiResponse> {
+    this.assertPaidEnabled();
+    if (!this.keywordMetricsEnabled) {
+      throw new Error("Keyword metrics calls are blocked. Set DATAFORSEO_KEYWORD_METRICS_ENABLED=true to enable them.");
+    }
+    const endpoint = "/v3/keywords_data/google_ads/search_volume/task_post";
+    return this.request(endpoint, { method: "POST", body: [task] });
+  }
+
+  async getKeywordMetricsTask(taskId: string): Promise<DataForSeoApiResponse> {
+    this.assertPaidEnabled();
+    if (!this.keywordMetricsEnabled) {
+      throw new Error("Keyword metrics calls are blocked. Set DATAFORSEO_KEYWORD_METRICS_ENABLED=true to enable them.");
+    }
+    const endpoint = `/v3/keywords_data/google_ads/search_volume/task_get/${encodeURIComponent(taskId)}`;
+    return this.request(endpoint);
+  }
+
+  async getReadyKeywordMetricsTaskIds() {
+    this.assertPaidEnabled();
+    if (!this.keywordMetricsEnabled) return { taskIds: [] as string[] };
+    const endpoint = "/v3/keywords_data/google_ads/search_volume/tasks_ready";
+    const response = await this.request(endpoint);
+    return { ...response, taskIds: readReadyTaskIds(response.responseBody) };
+  }
+
   assertSafeToRun(mode: DataForSeoMode, taskCount: number) {
     if (mode === "live" && !this.liveEnabled) {
       throw new Error("Live DataForSEO calls are blocked. Set DATAFORSEO_LIVE_ENABLED=true to allow a guarded live run.");
@@ -127,6 +200,57 @@ export class DataForSeoClient {
     if (mode === "live" && taskCount > this.maxLiveTasks) {
       throw new Error(`Live run blocked: ${taskCount} tasks exceeds DATAFORSEO_MAX_LIVE_TASKS_PER_RUN=${this.maxLiveTasks}.`);
     }
+  }
+
+  assertStandardTaskCount(taskCount: number) {
+    this.assertPaidEnabled();
+    if (taskCount > this.maxStandardTasks) {
+      throw new Error(
+        `Standard run blocked: ${taskCount} tasks exceeds DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN=${this.maxStandardTasks}.`
+      );
+    }
+  }
+
+  assertKeywordMetricsEnabled() {
+    this.assertPaidEnabled();
+    if (!this.keywordMetricsEnabled) {
+      throw new Error("Keyword metrics calls are blocked. Set DATAFORSEO_KEYWORD_METRICS_ENABLED=true to enable them.");
+    }
+  }
+
+  private assertPaidEnabled() {
+    if (!this.liveEnabled) {
+      throw new Error("Paid DataForSEO calls are blocked. Set DATAFORSEO_LIVE_ENABLED=true to allow them.");
+    }
+  }
+
+  private async request(
+    endpoint: string,
+    options: { method?: "GET" | "POST"; body?: unknown } = {}
+  ): Promise<DataForSeoApiResponse> {
+    if (!this.login || !this.password) {
+      throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
+    }
+
+    const response = await fetch(`https://api.dataforseo.com${endpoint}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
+        "Content-Type": "application/json"
+      },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      cache: "no-store"
+    });
+    const body = await response.json();
+
+    return {
+      endpoint,
+      sandbox: false,
+      requestBody: options.body ?? {},
+      responseBody: body,
+      statusCode: response.status,
+      costUsd: readCost(body)
+    };
   }
 }
 
@@ -173,4 +297,21 @@ function readCost(body: unknown) {
     const cost = (task as { cost?: unknown }).cost;
     return total + (typeof cost === "number" ? cost : 0);
   }, 0);
+}
+
+function readReadyTaskIds(body: unknown) {
+  if (!body || typeof body !== "object") return [];
+  const tasks = (body as { tasks?: unknown }).tasks;
+  if (!Array.isArray(tasks)) return [];
+
+  return tasks.flatMap((task) => {
+    if (!task || typeof task !== "object") return [];
+    const result = (task as { result?: unknown }).result;
+    if (!Array.isArray(result)) return [];
+    return result.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const id = (item as { id?: unknown }).id;
+      return typeof id === "string" ? [id] : [];
+    });
+  });
 }

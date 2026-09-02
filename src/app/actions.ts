@@ -8,8 +8,9 @@ import { currentActor, requireAdmin } from "@/lib/access";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { importRankHistoryCsv } from "@/lib/rank-history-import";
-import { enqueueProjectRerun, enqueueVerification } from "@/lib/rank-queue";
+import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/rank-queue";
 import { executeSandboxRankRun } from "@/lib/rank-runner";
+import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
 
@@ -313,6 +314,25 @@ export async function queueProjectRerun(clientId: string, formData: FormData) {
   revalidatePath("/runs");
   revalidatePath(`/clients/${clientId}`);
   redirect(`/runs/${runId}`);
+}
+
+export async function retryFailedRankRun(runId: string) {
+  const actor = await requireAdmin();
+  const newRunId = await retryRankRun(runId, actor.email);
+  revalidatePath("/runs");
+  redirect(`/runs/${newRunId}`);
+}
+
+export async function queueKeywordMetrics(projectId: string) {
+  await requireAdmin();
+  try {
+    await enqueueKeywordMetrics(projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to queue keyword metrics.";
+    redirect(`/projects/${projectId}?metricsError=${encodeURIComponent(message)}`);
+  }
+  revalidatePath(`/projects/${projectId}`);
+  redirect(`/projects/${projectId}?metricsQueued=1`);
 }
 
 function readForm(formData: FormData, keys: string[]) {

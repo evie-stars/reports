@@ -98,6 +98,7 @@ export function ClientReportDashboard({
               <tr>
                 <SortableHeader basePath={basePath} column="keyword" filters={filters} label="Keyword" />
                 <SortableHeader basePath={basePath} column="area" filters={filters} label="Area" />
+                <th>Volume</th>
                 <th>Result</th>
                 <SortableHeader basePath={basePath} column="current" filters={filters} label="Current" />
                 <th>Previous</th>
@@ -112,7 +113,7 @@ export function ClientReportDashboard({
               ))}
               {latestResults.length === 0 ? (
                 <tr>
-                  <td className="empty-table" colSpan={8}>
+                  <td className="empty-table" colSpan={9}>
                     No live rankings match these filters{readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}
                   </td>
                 </tr>
@@ -128,6 +129,8 @@ export function ClientReportDashboard({
           history={data.keywordHistory}
           keyword={data.selectedKeyword.phrase}
           targetUrl={data.selectedKeyword.targetUrl}
+          searchVolume={data.selectedKeyword.searchVolume}
+          monthlySearches={data.selectedKeyword.monthlySearches}
         />
       ) : null}
     </>
@@ -186,6 +189,7 @@ function RankingRow({ result, href }: { result: CurrentReportResult; href: strin
         <small className="row-context">{result.run.project.name} · {readableType(result.device)}</small>
       </td>
       <td>{result.location.name}</td>
+      <td>{result.keyword.searchVolume?.toLocaleString("en-GB") ?? "-"}</td>
       <td>{readableType(result.searchType)}</td>
       <td><span className={`rank-highlight ${state}`}>{result.rank ?? "-"}</span></td>
       <td>{result.previousRank ?? "-"}</td>
@@ -256,14 +260,19 @@ function KeywordDrawer({
   closeHref,
   history,
   keyword,
-  targetUrl
+  targetUrl,
+  searchVolume,
+  monthlySearches
 }: {
   closeHref: string;
   history: ClientReportData["keywordHistory"];
   keyword: string;
   targetUrl: string | null;
+  searchVolume: number | null;
+  monthlySearches: unknown;
 }) {
   const chartHistory = [...history].reverse().filter((item) => item.rank !== null);
+  const volumeTrend = readVolumeTrend(monthlySearches);
   return (
     <div className="report-drawer-layer">
       <Link className="drawer-backdrop" href={closeHref} scroll={false} aria-label="Close keyword history" />
@@ -273,6 +282,10 @@ function KeywordDrawer({
           <Link className="icon-button drawer-close" href={closeHref} scroll={false} title="Close">×</Link>
         </div>
         {targetUrl ? <p className="drawer-target"><strong>Target:</strong> {targetUrl}</p> : null}
+        <div className="keyword-demand-summary">
+          <div><span>Average monthly searches</span><strong>{searchVolume?.toLocaleString("en-GB") ?? "-"}</strong></div>
+          <VolumeTrend points={volumeTrend} />
+        </div>
         <RankHistoryChart history={chartHistory} />
         <div className="table-scroll drawer-history-table">
           <table className="table">
@@ -292,6 +305,32 @@ function KeywordDrawer({
       </aside>
     </div>
   );
+}
+
+function VolumeTrend({ points }: { points: Array<{ label: string; value: number }> }) {
+  if (points.length === 0) return <span className="muted">No search trend stored yet.</span>;
+  const max = Math.max(1, ...points.map((point) => point.value));
+  return (
+    <div className="volume-trend" role="img" aria-label="Monthly search volume trend">
+      {points.map((point) => (
+        <span key={point.label} className="volume-bar-wrap" title={`${point.label}: ${point.value.toLocaleString("en-GB")}`}>
+          <i className="volume-bar" style={{ height: `${Math.max(4, (point.value / max) * 100)}%` }} />
+          <small>{point.label}</small>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function readVolumeTrend(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as { year?: unknown; month?: unknown; search_volume?: unknown };
+    if (typeof item.year !== "number" || typeof item.month !== "number" || typeof item.search_volume !== "number") return [];
+    const date = new Date(Date.UTC(item.year, item.month - 1, 1));
+    return [{ label: date.toLocaleDateString("en-GB", { month: "short" }), value: item.search_volume }];
+  }).slice(-12);
 }
 
 function RankHistoryChart({ history }: { history: ClientReportData["keywordHistory"] }) {

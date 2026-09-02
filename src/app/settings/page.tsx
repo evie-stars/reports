@@ -1,6 +1,7 @@
 import { Icon } from "@/components/icon";
 import { redirect } from "next/navigation";
 import { currentActor } from "@/lib/access";
+import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,12 @@ export default async function SettingsPage() {
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const maxLiveTasks = process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1";
+  const maxStandardTasks = process.env.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN ?? "1000";
+  const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
   const allowedAccessConfigured = Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
+  const budget = await getDataForSeoBudgetSummary();
 
   return (
     <>
@@ -43,6 +47,18 @@ export default async function SettingsPage() {
               <tr>
                 <th>Max Live Tasks</th>
                 <td>{maxLiveTasks}</td>
+              </tr>
+              <tr>
+                <th>Max Standard Tasks</th>
+                <td>{maxStandardTasks}</td>
+              </tr>
+              <tr>
+                <th>Keyword Metrics</th>
+                <td><span className={keywordMetricsEnabled ? "status warn" : "status good"}>{keywordMetricsEnabled ? "Paid access enabled" : "Disabled"}</span></td>
+              </tr>
+              <tr>
+                <th>Monthly Budget</th>
+                <td>${budget.spentUsd.toFixed(4)} spent · ${budget.reservedUsd.toFixed(4)} reserved · ${budget.limitUsd.toFixed(2)} limit</td>
               </tr>
               <tr>
                 <th>Queue Delay</th>

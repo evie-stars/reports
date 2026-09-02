@@ -1743,6 +1743,119 @@ button.status:hover {
   padding-top: 10px;
 }
 
+.queue-summary {
+  margin-bottom: 14px;
+}
+
+.queue-table td,
+.queue-table th {
+  font-size: 11px;
+  padding-bottom: 9px;
+  padding-top: 9px;
+}
+
+.queue-error {
+  color: var(--danger);
+  display: block;
+  margin-top: 4px;
+  max-width: 240px;
+  white-space: normal;
+}
+
+.keyword-metrics-card {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.keyword-metrics-card h3 {
+  margin: 5px 0 3px;
+}
+
+.metrics-action {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.metrics-action small,
+.rerun-estimate {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.metrics-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.keyword-demand-summary {
+  align-items: end;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  margin: 12px 0;
+  padding: 12px;
+}
+
+.keyword-demand-summary > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.keyword-demand-summary span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.keyword-demand-summary strong {
+  font-size: 24px;
+}
+
+.volume-trend {
+  align-items: end;
+  display: flex;
+  gap: 4px;
+  height: 76px;
+  min-width: 0;
+}
+
+.volume-bar-wrap {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  justify-content: end;
+  min-width: 0;
+}
+
+.volume-bar {
+  background: var(--light-blue);
+  border-radius: 2px 2px 0 0;
+  display: block;
+  max-width: 18px;
+  min-height: 4px;
+  transition: filter 160ms ease, transform 160ms ease;
+  width: 70%;
+}
+
+.volume-bar-wrap:hover .volume-bar {
+  filter: brightness(1.12);
+  transform: scaleX(1.08);
+}
+
+.volume-bar-wrap small {
+  color: var(--muted);
+  font-size: 8px;
+  margin-top: 3px;
+}
+
 .login-page {
   align-items: center;
   display: flex;
@@ -1992,9 +2105,15 @@ button.status:hover {
   }
 
   .rerun-form,
-  .schedule-footer {
+  .schedule-footer,
+  .keyword-metrics-card,
+  .metrics-action {
     align-items: stretch;
     display: grid;
+  }
+
+  .keyword-demand-summary {
+    grid-template-columns: 1fr;
   }
 
   .schedule-grid {

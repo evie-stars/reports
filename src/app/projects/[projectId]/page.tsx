@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
   createKeywords,
+  queueKeywordMetrics,
   updateProjectSchedule,
   updateKeywordActive,
   updateLocationActive,
@@ -13,6 +14,7 @@ import { LiveRunForm } from "@/components/live-run-form";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
+import { configuredKeywordMetricsCostUsd, estimateRankRunCost } from "@/lib/dataforseo-costs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +23,10 @@ export default async function ProjectDetailPage({
   searchParams
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ sandboxError?: string; liveError?: string }>;
+  searchParams: Promise<{ sandboxError?: string; liveError?: string; metricsError?: string; metricsQueued?: string }>;
 }) {
   const { projectId } = await params;
-  const { sandboxError, liveError } = await searchParams;
+  const { sandboxError, liveError, metricsError, metricsQueued } = await searchParams;
   const actor = await currentActor();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -45,6 +47,15 @@ export default async function ProjectDetailPage({
   const activeLocations = project.locations.filter((location) => location.active);
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
+  const metricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
+  const scheduleEstimate = estimateRankRunCost({
+    keywordCount: activeKeywords.length,
+    locationCount: activeLocations.length,
+    devices: project.scheduleDevices,
+    searchTypes: project.scheduleSearchTypes,
+    pageLimit: project.schedulePageLimit
+  }, "standard");
+  const queueMetrics = queueKeywordMetrics.bind(null, project.id);
 
   return (
     <>
@@ -61,6 +72,8 @@ export default async function ProjectDetailPage({
 
       {sandboxError ? <div className="notice danger-notice"><strong>Sandbox check not started.</strong> {sandboxError}</div> : null}
       {liveError ? <div className="notice danger-notice"><strong>Live check not started.</strong> {liveError}</div> : null}
+      {metricsError ? <div className="notice danger-notice"><strong>Keyword metrics not queued.</strong> {metricsError}</div> : null}
+      {metricsQueued ? <div className="notice"><strong>Keyword metrics queued.</strong> The worker will submit and collect them.</div> : null}
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
@@ -137,11 +150,36 @@ export default async function ProjectDetailPage({
         </div>
         <div className="schedule-footer">
           <p className="muted form-note">
-            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * project.scheduleSearchTypes.length} paid task(s). Worker limit: {process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1"}.
+            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * project.scheduleSearchTypes.length} Standard task(s). Maximum estimate: ${scheduleEstimate.toFixed(4)} per report.
           </p>
           <button className="button" type="submit">Save Schedule</button>
         </div>
       </form>
+
+      <section className="card spaced-section keyword-metrics-card">
+        <div>
+          <p className="label label-with-icon"><Icon name="graph" />Keyword Demand</p>
+          <h3>Search volume and 12-month trends</h3>
+          <p className="muted">One bulk Standard task covers all {activeKeywords.length} active keywords using the first active area.</p>
+        </div>
+        <div className="metrics-action">
+          <span className={`status ${project.keywordMetricsStatus === "completed" ? "good" : project.keywordMetricsStatus === "failed" ? "danger" : "warn"}`}>
+            {project.keywordMetricsStatus}
+          </span>
+          <small>Maximum estimate ${configuredKeywordMetricsCostUsd().toFixed(2)}</small>
+          {!metricsEnabled ? <small>Disabled in server settings</small> : null}
+          <form action={queueMetrics}>
+            <button
+              className="button button-secondary"
+              type="submit"
+              disabled={!metricsEnabled || ["queued", "submitting", "submitted"].includes(project.keywordMetricsStatus)}
+            >
+              {project.keywordMetricsStatus === "completed" ? "Refresh Metrics" : "Queue Metrics"}
+            </button>
+          </form>
+        </div>
+        {project.keywordMetricsError ? <p className="danger-text metrics-error">{project.keywordMetricsError}</p> : null}
+      </section>
 
       <section style={{ marginTop: 18 }}>
         <SandboxRunForm
@@ -211,7 +249,7 @@ export default async function ProjectDetailPage({
               <tr key={run.id}>
                 <td><Link href={`/runs/${run.id}`}>{run.createdAt.toLocaleDateString("en-GB")}</Link></td>
                 <td><span className="status">{run.status}</span></td>
-                <td>{run.sandbox ? "Sandbox" : "Live"}</td>
+                <td>{readableDeliveryMethod(run.deliveryMethod)}</td>
                 <td>{run.results.length}</td>
                 <td>${run.actualCostUsd.toString()}</td>
               </tr>
@@ -228,12 +266,20 @@ export default async function ProjectDetailPage({
   );
 }
 
+function readableDeliveryMethod(method: string) {
+  if (method === "standard") return "Standard";
+  if (method === "live") return "Live";
+  return method.charAt(0).toUpperCase() + method.slice(1);
+}
+
 type Keyword = {
   id: string;
   phrase: string;
   group: string | null;
   targetUrl: string | null;
   active: boolean;
+  searchVolume: number | null;
+  cpcUsd: { toString(): string } | null;
 };
 
 type Location = {
@@ -253,6 +299,8 @@ function KeywordTable({ projectId, keywords }: { projectId: string; keywords: Ke
           <tr>
             <th>Keyword</th>
             <th>Group</th>
+            <th>Volume</th>
+            <th>CPC</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -263,6 +311,8 @@ function KeywordTable({ projectId, keywords }: { projectId: string; keywords: Ke
               <tr key={keyword.id}>
                 <td>{keyword.phrase}</td>
                 <td>{keyword.group ?? "-"}</td>
+                <td>{keyword.searchVolume?.toLocaleString("en-GB") ?? "-"}</td>
+                <td>{keyword.cpcUsd ? `$${keyword.cpcUsd.toString()}` : "-"}</td>
                 <td>
                   <form action={toggleKeyword}>
                     <button className={`status ${keyword.active ? "good" : ""}`} type="submit">
@@ -275,7 +325,7 @@ function KeywordTable({ projectId, keywords }: { projectId: string; keywords: Ke
           })}
           {keywords.length === 0 ? (
             <tr>
-              <td colSpan={3} className="muted">No keywords yet.</td>
+              <td colSpan={5} className="muted">No keywords yet.</td>
             </tr>
           ) : null}
         </tbody>

@@ -14,6 +14,7 @@ import { Icon } from "@/components/icon";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
 import { currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { estimateRankRunCost } from "@/lib/dataforseo-costs";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +129,17 @@ export default async function ClientDetailPage({ params, searchParams }: {
       <ClientHeader
         clientId={client.id}
         clientName={client.name}
-        projects={client.projects.map(({ id, name }) => ({ id, name }))}
+        projects={client.projects.map((project) => ({
+          id: project.id,
+          name: project.name,
+          estimatedCostUsd: estimateRankRunCost({
+            keywordCount: project.keywords.length,
+            locationCount: project.locations.length,
+            devices: project.scheduleDevices,
+            searchTypes: project.scheduleSearchTypes,
+            pageLimit: project.schedulePageLimit
+          }, "standard")
+        }))}
         role={actor.role}
         shareEnabled={client.shareEnabled}
         shareToken={client.shareToken}
@@ -150,7 +161,7 @@ function ClientHeader({
 }: {
   clientId: string;
   clientName: string;
-  projects?: Array<{ id: string; name: string }>;
+  projects?: Array<{ id: string; name: string; estimatedCostUsd: number }>;
   role: "admin" | "sales";
   settingsOpen?: boolean;
   shareEnabled?: boolean;
@@ -172,9 +183,11 @@ function ClientHeader({
         ) : null}
         {!settingsOpen && projects.length > 0 ? (
           <form className="rerun-form" action={queueRerun}>
-            {projects.length === 1 ? <input type="hidden" name="projectId" value={projects[0].id} /> : (
+            {projects.length === 1 ? (
+              <><input type="hidden" name="projectId" value={projects[0].id} /><span className="rerun-estimate">Est. ${projects[0].estimatedCostUsd.toFixed(4)}</span></>
+            ) : (
               <select name="projectId" aria-label="Report to re-run" required>
-                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · est. ${project.estimatedCostUsd.toFixed(4)}</option>)}
               </select>
             )}
             <button className="button" type="submit">Queue Re-run</button>

@@ -2,12 +2,14 @@ import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
 import { Icon } from "@/components/icon";
 import Link from "next/link";
+import { retryFailedRankRun } from "@/app/actions";
+import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 
 export const dynamic = "force-dynamic";
 
 export default async function RunsPage() {
-  await currentActor();
-  const { runs, dbUnavailable } = await getRunsData();
+  const actor = await currentActor();
+  const { runs, schedules, budget, dbUnavailable } = await getRunsData();
 
   return (
     <>
@@ -25,18 +27,50 @@ export default async function RunsPage() {
         </div>
       ) : null}
 
-      <section className="card">
-        <p className="label label-with-icon"><Icon name="graph" />Run History</p>
-        <table className="table">
+      <section className="summary-strip queue-summary" aria-label="Queue and budget summary">
+        <Summary label="Monthly limit" value={`$${budget.limitUsd.toFixed(2)}`} />
+        <Summary label="Spent" value={`$${budget.spentUsd.toFixed(4)}`} />
+        <Summary label="Reserved" value={`$${budget.reservedUsd.toFixed(4)}`} />
+        <Summary label="Available" value={`$${budget.availableUsd.toFixed(4)}`} />
+      </section>
+
+      <section className="card spaced-section">
+        <div className="section-heading compact-heading">
+          <div><p className="label label-with-icon"><Icon name="settings" />Monthly Schedules</p><h3>Upcoming automated reports</h3></div>
+          <span className="muted">{schedules.length} enabled</span>
+        </div>
+        <div className="table-scroll">
+          <table className="table queue-table">
+            <thead><tr><th>Client / Report</th><th>Next run</th><th>Keywords</th><th>Areas</th><th>Method</th></tr></thead>
+            <tbody>
+              {schedules.map((project) => (
+                <tr key={project.id}>
+                  <td><Link href={`/projects/${project.id}`}>{project.client.name} / {project.name}</Link></td>
+                  <td>{nextScheduleDate(project.scheduleDay).toLocaleDateString("en-GB")}</td>
+                  <td>{project._count.keywords}</td>
+                  <td>{project._count.locations}</td>
+                  <td><span className="status good">Standard</span></td>
+                </tr>
+              ))}
+              {schedules.length === 0 ? <tr><td className="empty-table" colSpan={5}>No monthly schedules are enabled.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card spaced-section">
+        <div className="section-heading compact-heading"><div><p className="label label-with-icon"><Icon name="graph" />Queue Operations</p><h3>Report history and progress</h3></div></div>
+        <div className="table-scroll"><table className="table queue-table">
           <thead>
             <tr>
               <th>Date</th>
               <th>Client / Project</th>
               <th>Status</th>
-              <th>Mode</th>
-              <th>Results</th>
-              <th>Requests</th>
+              <th>Method</th>
+              <th>Progress</th>
               <th>Cost</th>
+              <th>Requested by</th>
+              <th><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -44,20 +78,32 @@ export default async function RunsPage() {
               <tr key={run.id}>
                 <td><Link href={`/runs/${run.id}`}>{run.createdAt.toLocaleDateString("en-GB")}</Link></td>
                 <td><Link href={`/projects/${run.project.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
-                <td><span className="status">{run.status}</span></td>
-                <td>{run.sandbox ? "Sandbox" : "Live"}</td>
-                <td>{run.results.length}</td>
-                <td>{run.apiRequests.length}</td>
-                <td>${run.actualCostUsd.toString()}</td>
+                <td>
+                  <span className={`status ${statusTone(run.status)}`}>{run.status}</span>
+                  {run.nextPollAt ? <small className="row-context">Next check {run.nextPollAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</small> : null}
+                  {run.lastError ? <small className="queue-error">{run.lastError}</small> : null}
+                </td>
+                <td>{readableMethod(run.deliveryMethod)}</td>
+                <td>
+                  <strong>{run.completedTasks + run.failedTasks} / {run.requestedTasks}</strong>
+                  <small className="row-context">{run.failedTasks ? `${run.failedTasks} failed` : `${run.results.length} stored`}</small>
+                </td>
+                <td><strong>${run.actualCostUsd.toString()}</strong><small className="row-context">est. ${run.estimatedCostUsd.toString()}</small></td>
+                <td>{run.requestedByEmail ?? "System"}</td>
+                <td className="table-action-cell">
+                  {actor.role === "admin" && (run.status === "failed" || run.status === "blocked") && run.selection ? (
+                    <form action={retryFailedRankRun.bind(null, run.id)}><button className="button button-secondary" type="submit">Retry</button></form>
+                  ) : null}
+                </td>
               </tr>
             ))}
             {runs.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">No runs stored yet.</td>
+                <td colSpan={8} className="muted">No runs stored yet.</td>
               </tr>
             ) : null}
           </tbody>
-        </table>
+        </table></div>
       </section>
     </>
   );
@@ -65,18 +111,52 @@ export default async function RunsPage() {
 
 async function getRunsData() {
   try {
-    const runs = await prisma.rankRun.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      include: {
-        project: { include: { client: true } },
-        results: true,
-        apiRequests: true
-      }
-    });
+    const [runs, schedules, budget] = await Promise.all([
+      prisma.rankRun.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        include: { project: { include: { client: true } }, results: true }
+      }),
+      prisma.project.findMany({
+        where: { scheduleEnabled: true },
+        orderBy: [{ scheduleDay: "asc" }, { name: "asc" }],
+        include: {
+          client: true,
+          _count: { select: { keywords: { where: { active: true } }, locations: { where: { active: true } } } }
+        }
+      }),
+      getDataForSeoBudgetSummary()
+    ]);
 
-    return { runs, dbUnavailable: false };
+    return { runs, schedules, budget, dbUnavailable: false };
   } catch {
-    return { runs: [], dbUnavailable: true };
+    return {
+      runs: [],
+      schedules: [],
+      budget: { limitUsd: 1, spentUsd: 0, reservedUsd: 0, availableUsd: 1 },
+      dbUnavailable: true
+    };
   }
+}
+
+function Summary({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function nextScheduleDate(day: number) {
+  const now = new Date();
+  const current = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 12));
+  return current >= now ? current : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, 12));
+}
+
+function statusTone(status: string) {
+  if (status === "completed") return "good";
+  if (status === "failed" || status === "blocked") return "danger";
+  return "warn";
+}
+
+function readableMethod(method: string) {
+  if (method === "standard") return "Standard queue";
+  if (method === "live") return "Live check";
+  return method.charAt(0).toUpperCase() + method.slice(1);
 }

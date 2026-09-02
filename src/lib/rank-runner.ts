@@ -1,5 +1,6 @@
 import { Device, Prisma, RankDirection, SearchType } from "@prisma/client";
 import { DataForSeoClient, DataForSeoMode, DataForSeoTask } from "@/lib/dataforseo";
+import { estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { MAX_SANDBOX_TASKS } from "@/lib/rank-config";
 import { parseDataForSeoItems, ParsedRankItem } from "@/lib/rank-parser";
@@ -86,13 +87,30 @@ async function executeRankRun(
 
   const client = new DataForSeoClient();
   client.assertSafeToRun(mode, requestedTasks);
+  const estimatedCostUsd = mode === "live"
+    ? estimateRankRunCost({
+        keywordCount: project.keywords.length,
+        locationCount: project.locations.length,
+        devices: selection.devices,
+        searchTypes: selection.searchTypes,
+        pageLimit: livePageLimit
+      }, "live")
+    : 0;
   const modeLabel = mode === "sandbox" ? "Sandbox" : existingRunId ? "Queued live report" : "Live verification";
 
   const runNotes = `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s)${mode === "live" ? `, up to ${livePageLimit} organic result page(s)` : ""}.`;
   const run = existingRunId
     ? await prisma.rankRun.update({
         where: { id: existingRunId },
-        data: { status: "running", sandbox: false, startedAt: new Date(), requestedTasks, notes: runNotes }
+        data: {
+          status: "running",
+          sandbox: false,
+          deliveryMethod: "live",
+          startedAt: new Date(),
+          requestedTasks,
+          estimatedCostUsd,
+          notes: runNotes
+        }
       })
     : await prisma.rankRun.create({
         data: {
@@ -100,8 +118,10 @@ async function executeRankRun(
           status: "running",
           sandbox: mode === "sandbox",
           source: mode === "sandbox" ? "sandbox" : "verification",
+          deliveryMethod: mode === "sandbox" ? "sandbox" : "live",
           startedAt: new Date(),
           requestedTasks,
+          estimatedCostUsd,
           notes: runNotes
         }
       });
@@ -146,44 +166,15 @@ async function executeRankRun(
               continue;
             }
 
-            const parsedItems = parseDataForSeoItems(response.responseBody, {
+            await storeRankResultFromResponse({
+              runId: run.id,
+              keywordId: keyword.id,
+              locationId: location.id,
+              searchType,
+              device,
               targetDomain: project.domain,
-              targetBusinessName: project.targetBusinessName
-            });
-            const matchedItem = bestMatchedItem(parsedItems);
-            const previousResult = await findPreviousResult(keyword.id, location.id, searchType, device);
-            const previousRank = previousResult?.rankAbsolute ?? previousResult?.rankGroup ?? null;
-            const currentRank = matchedItem?.rankAbsolute ?? matchedItem?.rankGroup ?? null;
-
-            await prisma.rankResult.create({
-              data: {
-                runId: run.id,
-                keywordId: keyword.id,
-                locationId: location.id,
-                searchType,
-                device,
-                rankGroup: matchedItem?.rankGroup,
-                rankAbsolute: matchedItem?.rankAbsolute,
-                matched: Boolean(matchedItem),
-                matchedName: matchedItem?.title,
-                matchedUrl: matchedItem?.url,
-                resultTitle: matchedItem?.title,
-                resultUrl: matchedItem?.url,
-                resultDomain: matchedItem?.domain,
-                direction: getDirection(currentRank, previousRank),
-                previousRank,
-                ...(matchedItem ? { rawItem: matchedItem.rawItem as Prisma.InputJsonValue } : {}),
-                serpFeatures: {
-                  create: getStoredItems(parsedItems, matchedItem, searchType).map((item) => ({
-                    type: item.storedType,
-                    title: item.title,
-                    url: item.url,
-                    rankGroup: item.rankGroup,
-                    rankAbsolute: item.rankAbsolute,
-                    rawItem: item.rawItem as Prisma.InputJsonValue
-                  }))
-                }
-              }
+              targetBusinessName: project.targetBusinessName,
+              responseBody: response.responseBody
             });
 
             completedTasks += 1;
@@ -223,11 +214,77 @@ async function executeRankRun(
       status,
       completedAt: new Date(),
       actualCostUsd: totalCostUsd,
+      completedTasks,
+      failedTasks,
       notes: `${run.notes} ${summary}`
     }
   });
 
   return run.id;
+}
+
+export async function storeRankResultFromResponse(input: {
+  runId: string;
+  keywordId: string;
+  locationId: string;
+  searchType: SearchType;
+  device: Device;
+  targetDomain: string;
+  targetBusinessName: string | null;
+  responseBody: unknown;
+}) {
+  const existing = await prisma.rankResult.findFirst({
+    where: {
+      runId: input.runId,
+      keywordId: input.keywordId,
+      locationId: input.locationId,
+      searchType: input.searchType,
+      device: input.device
+    },
+    select: { id: true }
+  });
+  if (existing) return existing.id;
+
+  const parsedItems = parseDataForSeoItems(input.responseBody, {
+    targetDomain: input.targetDomain,
+    targetBusinessName: input.targetBusinessName
+  });
+  const matchedItem = bestMatchedItem(parsedItems);
+  const previousResult = await findPreviousResult(input.keywordId, input.locationId, input.searchType, input.device);
+  const previousRank = previousResult?.rankAbsolute ?? previousResult?.rankGroup ?? null;
+  const currentRank = matchedItem?.rankAbsolute ?? matchedItem?.rankGroup ?? null;
+
+  const result = await prisma.rankResult.create({
+    data: {
+      runId: input.runId,
+      keywordId: input.keywordId,
+      locationId: input.locationId,
+      searchType: input.searchType,
+      device: input.device,
+      rankGroup: matchedItem?.rankGroup,
+      rankAbsolute: matchedItem?.rankAbsolute,
+      matched: Boolean(matchedItem),
+      matchedName: matchedItem?.title,
+      matchedUrl: matchedItem?.url,
+      resultTitle: matchedItem?.title,
+      resultUrl: matchedItem?.url,
+      resultDomain: matchedItem?.domain,
+      direction: getDirection(currentRank, previousRank),
+      previousRank,
+      ...(matchedItem ? { rawItem: matchedItem.rawItem as Prisma.InputJsonValue } : {}),
+      serpFeatures: {
+        create: getStoredItems(parsedItems, matchedItem, input.searchType).map((item) => ({
+          type: item.storedType,
+          title: item.title,
+          url: item.url,
+          rankGroup: item.rankGroup,
+          rankAbsolute: item.rankAbsolute,
+          rawItem: item.rawItem as Prisma.InputJsonValue
+        }))
+      }
+    }
+  });
+  return result.id;
 }
 
 async function pauseBetweenTasks() {
@@ -336,7 +393,7 @@ function getDirection(currentRank: number | null, previousRank: number | null): 
   return "unchanged";
 }
 
-function getDataForSeoError(responseBody: unknown, statusCode: number) {
+export function getDataForSeoError(responseBody: unknown, statusCode: number) {
   if (statusCode >= 400) return `HTTP ${statusCode} returned by DataForSEO.`;
   const body = asRecord(responseBody);
   const rootCode = numberValue(body?.status_code);
@@ -348,6 +405,7 @@ function getDataForSeoError(responseBody: unknown, statusCode: number) {
   for (const task of tasks) {
     const taskRecord = asRecord(task);
     const taskCode = numberValue(taskRecord?.status_code);
+    if (taskCode === 40601 || taskCode === 40602) continue;
     if (taskCode && taskCode >= 40000) {
       return stringValue(taskRecord?.status_message) ?? `DataForSEO task status ${taskCode}.`;
     }

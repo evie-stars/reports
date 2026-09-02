@@ -24,13 +24,21 @@ Each run stores:
 
 The sandbox action always calls the DataForSEO sandbox host and cannot be promoted to live mode. Paid calls use the separate single live verification control below.
 
-## Live Reports And Queue
+## Paid Reports And Queue
 
-The project page includes a one-task live verification control and a monthly report schedule. Paid checks are stored as queue records and processed sequentially by `npm run rank:worker`. Organic checks can be capped between one and ten result pages; the request uses DataForSEO's stop-on-match option so crawling can finish as soon as the target domain is found. Search operators that can multiply DataForSEO cost are blocked.
+The project page includes a one-task Live verification control and a monthly report schedule. Live is retained only for immediate, one-keyword checks. Ad hoc and scheduled reports use DataForSEO Standard tasks, which are submitted in batches and collected by later worker runs. Paid checks are stored as queue records and processed sequentially by `npm run rank:worker`.
 
-`DATAFORSEO_MAX_LIVE_TASKS_PER_RUN` remains the hard task ceiling for verification, scheduled, and ad hoc jobs. Increase it only after checking the report's keyword x area x device x result-type task count. The exact cost returned by DataForSEO is stored on the run and API audit records.
+Organic checks can be capped between one and ten result pages. The cost preview accounts for each organic page; Local Finder and Maps each count as one task unit. Search operators that can multiply DataForSEO cost are blocked. `DATAFORSEO_MAX_LIVE_TASKS_PER_RUN` caps immediate checks and `DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN` caps full reports.
+
+`DATAFORSEO_MONTHLY_BUDGET_USD` is a hard application-level monthly ceiling. The queue reserves the maximum estimated cost before accepting a run, then stores the exact DataForSEO-reported charge. Polling requests are excluded from spend totals so task cost is not counted twice. The Rank Runs screen shows current spend, reservations, available budget, task progress, failures, retries, and upcoming schedules.
 
 The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks. Sales users cannot queue another full report within `RANK_SALES_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; administrators can override that cooldown.
+
+## Keyword Demand
+
+Search volume, CPC, competition, and monthly demand trends are optional because they use a separate Google Ads Standard task. One task can contain up to 1,000 active keywords for a report and uses its first active DataForSEO area. The default estimate is `$0.06` for the whole bulk task.
+
+Keep `DATAFORSEO_KEYWORD_METRICS_ENABLED=false` until you intentionally want to spend that amount. Set it to `true` to enable the **Queue Metrics** button. The same monthly budget ceiling applies, and results are stored both on each keyword and as timestamped metric snapshots.
 
 ## Google Sign-in
 
@@ -106,7 +114,7 @@ Return to these items before broader client access or adding GA4 and Google Sear
    cd /var/www/vhosts/reports.starwebsites.co.uk && npm run rank:worker
    ```
 
-The exact `cd` path must be the application root shown by Plesk. The worker first enqueues due monthly schedules and then processes the queue. Only enable schedules after confirming the task count, `DATAFORSEO_MAX_LIVE_TASKS_PER_RUN`, and available DataForSEO balance.
+The exact `cd` path must be the application root shown by Plesk. The worker enqueues due monthly schedules, submits or collects Standard ranking tasks, and then processes optional keyword metrics. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
 
 ## DataForSEO Safety
 
@@ -116,6 +124,14 @@ The integration defaults to Sandbox:
 - `DATAFORSEO_LIVE_ENABLED=false`
 - `DATAFORSEO_MAX_LIVE_TASKS_PER_RUN=1`
 
-Live calls are blocked unless `DATAFORSEO_LIVE_ENABLED=true`; the task ceiling is enforced both when a job is queued and when the worker executes it.
+All paid calls are blocked unless `DATAFORSEO_LIVE_ENABLED=true`; despite the legacy variable name, this gate now covers both Live and Standard endpoints. Task ceilings and the monthly budget are enforced before a job is accepted. Keyword metrics have the additional `DATAFORSEO_KEYWORD_METRICS_ENABLED` gate.
 
 Every DataForSEO task is sent with a `tag` in the format `client:project:job_type`, so costs can be grouped in our own database later.
+
+Run the no-spend contract suite before deployment:
+
+```bash
+npm test
+```
+
+The tests use fixed response fixtures and never contact DataForSEO.
