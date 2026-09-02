@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { Icon } from "@/components/icon";
 import "./globals.css";
@@ -20,9 +21,15 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <div className="app-shell">
           <aside className="sidebar">
             <div className="brand-block">
-              <div className="brand-mark">SR</div>
-              <p className="eyebrow">Star Reports</p>
-              <h1>Local SEO Hub</h1>
+              <Image
+                className="brand-logo"
+                src="/star-websites.png"
+                alt="Star Websites"
+                width={684}
+                height={273}
+                priority
+              />
+              <h1>Report Hub</h1>
             </div>
             <nav>
               <Link href="/"><Icon name="home" />Dashboard</Link>

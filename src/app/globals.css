@@ -1,20 +1,23 @@
 :root {
   color-scheme: light;
-  --bg: #f3f5f7;
+  --dark-blue: #1e232d;
+  --green: #50a775;
+  --light-blue: #2265b3;
+  --bg: #f2f5f7;
   --surface: #ffffff;
-  --surface-alt: #f7fafc;
-  --surface-strong: #e8eef3;
-  --text: #18232b;
-  --muted: #667582;
-  --line: #d9e1e8;
-  --accent: #4f7cff;
-  --accent-strong: #2f5fe4;
-  --accent-soft: #eef3ff;
-  --ink: #121727;
+  --surface-alt: #f6f9fb;
+  --surface-strong: #e7edf2;
+  --text: #1e232d;
+  --muted: #68737d;
+  --line: #d9e2e8;
+  --accent: var(--light-blue);
+  --accent-strong: #194f8e;
+  --accent-soft: #e8f0f9;
+  --ink: var(--dark-blue);
   --warning: #a66300;
   --danger: #b42318;
-  --good: #147a55;
-  --shadow: 0 10px 30px rgba(21, 37, 48, 0.08);
+  --good: #347e58;
+  --shadow: 0 10px 30px rgba(30, 35, 45, 0.07), 0 2px 8px rgba(34, 101, 179, 0.04);
 }
 
 * {
@@ -23,7 +26,10 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    linear-gradient(135deg, rgba(34, 101, 179, 0.035), transparent 34%),
+    linear-gradient(315deg, rgba(80, 167, 117, 0.045), transparent 30%),
+    var(--bg);
   color: var(--text);
   font-family: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -43,50 +49,44 @@ a {
   display: flex;
   flex-direction: column;
   gap: 28px;
-  background: linear-gradient(180deg, #121727 0%, #1b2540 100%);
+  background:
+    radial-gradient(120% 55% at 10% 0%, rgba(34, 101, 179, 0.8) 0%, rgba(34, 101, 179, 0) 70%),
+    radial-gradient(110% 48% at 100% 100%, rgba(80, 167, 117, 0.54) 0%, rgba(80, 167, 117, 0) 72%),
+    linear-gradient(160deg, #1e232d 0%, #192b3a 54%, #1e232d 100%);
   color: white;
+  overflow: hidden;
   padding: 26px 18px;
+  position: relative;
+  isolation: isolate;
+}
+
+.sidebar::before {
+  background: linear-gradient(145deg, rgba(34, 101, 179, 0.38), transparent 42%, rgba(80, 167, 117, 0.3));
+  content: "";
+  filter: blur(34px);
+  inset: -28px;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
 }
 
 .sidebar h1 {
-  margin: 6px 0 0;
-  font-size: 21px;
+  margin: 13px 0 0;
+  font-size: 23px;
+  font-weight: 700;
   line-height: 1.15;
 }
 
 .brand-block {
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  column-gap: 12px;
-  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 2px 10px 24px;
 }
 
-.brand-block .eyebrow,
-.brand-block h1 {
-  grid-column: 2;
-}
-
-.brand-mark {
-  align-items: center;
-  align-self: start;
-  background: #ffffff;
-  border-radius: 8px;
-  color: var(--accent-strong);
-  display: flex;
-  font-size: 13px;
-  font-weight: 900;
-  height: 44px;
-  justify-content: center;
-  width: 44px;
-}
-
-.eyebrow {
-  margin: 0;
-  color: #9fd6d1;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
+.brand-logo {
+  display: block;
+  height: auto;
+  max-width: 104px;
+  width: 100%;
 }
 
 .sidebar nav {
@@ -106,7 +106,8 @@ a {
 }
 
 .sidebar nav a:hover {
-  background: rgba(255, 255, 255, 0.09);
+  background: linear-gradient(90deg, rgba(34, 101, 179, 0.56), rgba(80, 167, 117, 0.22));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: white;
 }
 
@@ -132,6 +133,17 @@ main {
   margin: -22px -34px 30px;
   min-height: 56px;
   padding: 0 34px;
+  position: relative;
+}
+
+.topbar::after {
+  background: linear-gradient(90deg, var(--light-blue), var(--green), transparent 78%);
+  bottom: -1px;
+  content: "";
+  height: 2px;
+  left: 34px;
+  position: absolute;
+  width: 148px;
 }
 
 .icon {
@@ -185,6 +197,12 @@ main {
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 20px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.card:hover {
+  border-color: rgba(34, 101, 179, 0.28);
+  box-shadow: 0 12px 34px rgba(30, 35, 45, 0.09), 0 3px 10px rgba(80, 167, 117, 0.06);
 }
 
 .card h3 {
@@ -217,7 +235,7 @@ main {
 
 .icon-tile {
   align-items: center;
-  background: var(--accent-soft);
+  background: linear-gradient(135deg, rgba(34, 101, 179, 0.13), rgba(80, 167, 117, 0.16));
   border-radius: 8px;
   color: var(--accent-strong);
   display: flex;
@@ -297,7 +315,7 @@ main {
 }
 
 .status.good {
-  background: #def8ed;
+  background: linear-gradient(135deg, #ddf3e7, #e8f4f2);
   color: var(--good);
 }
 
@@ -318,7 +336,7 @@ main {
   min-height: 42px;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--light-blue), #277e91 68%, var(--green));
   color: white;
   cursor: pointer;
   padding: 0 16px;
@@ -327,7 +345,7 @@ main {
 }
 
 .button:hover {
-  background: var(--accent-strong);
+  background: linear-gradient(135deg, var(--accent-strong), #236f81 68%, #438f64);
   border-color: var(--accent-strong);
   transform: translateY(-1px);
 }
@@ -378,7 +396,7 @@ main {
 .form input:focus,
 .form textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.14);
+  box-shadow: 0 0 0 3px rgba(34, 101, 179, 0.13);
   outline: none;
 }
 
