@@ -29,6 +29,7 @@ async function main() {
       projectId: project.id,
       status: "running",
       sandbox: mode === "sandbox",
+      source: mode === "sandbox" ? "sandbox" : "verification",
       startedAt: new Date(),
       requestedTasks: 1,
       notes: `${mode} check for ${keyword.phrase} in ${location.name}`

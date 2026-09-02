@@ -114,7 +114,7 @@ function LiveSubmit({ disabled, pageLimit }: { disabled: boolean; pageLimit: num
   const { pending } = useFormStatus();
   return (
     <button className="button live-button" type="submit" disabled={disabled || pending}>
-      {pending ? "Running live check..." : `Check Up To Page ${pageLimit}`}
+      {pending ? "Adding to queue..." : `Queue Check to Page ${pageLimit}`}
     </button>
   );
 }

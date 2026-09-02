@@ -4,10 +4,12 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { currentActor, requireAdmin } from "@/lib/access";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { importRankHistoryCsv } from "@/lib/rank-history-import";
-import { executeLiveRankRun, executeSandboxRankRun } from "@/lib/rank-runner";
+import { enqueueProjectRerun, enqueueVerification } from "@/lib/rank-queue";
+import { executeSandboxRankRun } from "@/lib/rank-runner";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
 
@@ -62,7 +64,16 @@ const liveRunSchema = z.object({
   confirmLiveCost: z.literal("yes")
 });
 
+const scheduleSchema = z.object({
+  scheduleEnabled: z.boolean(),
+  scheduleDay: z.coerce.number().int().min(1).max(28),
+  scheduleDevices: z.array(z.enum(["desktop", "mobile"])).min(1),
+  scheduleSearchTypes: z.array(z.enum(["organic", "local_finder", "maps"])).min(1),
+  schedulePageLimit: z.coerce.number().int().min(1).max(10)
+});
+
 export async function createClient(formData: FormData) {
+  await requireAdmin();
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   const client = await prisma.client.create({ data });
 
@@ -71,6 +82,7 @@ export async function createClient(formData: FormData) {
 }
 
 export async function importRankHistory(formData: FormData) {
+  await requireAdmin();
   let clientId: string;
 
   try {
@@ -95,6 +107,7 @@ export async function importRankHistory(formData: FormData) {
 }
 
 export async function updateClient(clientId: string, formData: FormData) {
+  await requireAdmin();
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   await prisma.client.update({ where: { id: clientId }, data });
 
@@ -103,6 +116,7 @@ export async function updateClient(clientId: string, formData: FormData) {
 }
 
 export async function enableClientShare(clientId: string) {
+  await requireAdmin();
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { shareToken: true } });
   if (!client) throw new Error("Client not found.");
 
@@ -118,11 +132,13 @@ export async function enableClientShare(clientId: string) {
 }
 
 export async function disableClientShare(clientId: string) {
+  await requireAdmin();
   await prisma.client.update({ where: { id: clientId }, data: { shareEnabled: false } });
   revalidatePath(`/clients/${clientId}`);
 }
 
 export async function createProject(formData: FormData) {
+  await requireAdmin();
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   const project = await prisma.project.create({ data });
 
@@ -132,6 +148,7 @@ export async function createProject(formData: FormData) {
 }
 
 export async function updateProject(projectId: string, formData: FormData) {
+  await requireAdmin();
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   await prisma.project.update({ where: { id: projectId }, data });
 
@@ -140,6 +157,7 @@ export async function updateProject(projectId: string, formData: FormData) {
 }
 
 export async function createKeyword(formData: FormData) {
+  await requireAdmin();
   const data = keywordSchema.parse(readForm(formData, ["projectId", "phrase", "group", "targetUrl"]));
   await prisma.keyword.create({ data });
 
@@ -147,6 +165,7 @@ export async function createKeyword(formData: FormData) {
 }
 
 export async function createKeywords(formData: FormData) {
+  await requireAdmin();
   const data = bulkKeywordSchema.parse(readForm(formData, ["projectId", "phrases", "group", "targetUrl"]));
   const phrases = uniqueLines(data.phrases);
 
@@ -163,11 +182,13 @@ export async function createKeywords(formData: FormData) {
 }
 
 export async function updateKeywordActive(keywordId: string, projectId: string, active: boolean) {
+  await requireAdmin();
   await prisma.keyword.update({ where: { id: keywordId }, data: { active } });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function createLocation(formData: FormData) {
+  await requireAdmin();
   const data = locationSchema.parse(readForm(formData, ["projectId", "countryCode", "dataForSeoLocationName"]));
   const supportedAreas = await new DataForSeoClient().getGoogleLocations(data.countryCode);
   const area = supportedAreas.find((location) => location.locationName === data.dataForSeoLocationName);
@@ -203,11 +224,13 @@ export async function createLocation(formData: FormData) {
 }
 
 export async function updateLocationActive(locationId: string, projectId: string, active: boolean) {
+  await requireAdmin();
   await prisma.location.update({ where: { id: locationId }, data: { active } });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function runSandboxCheck(projectId: string, formData: FormData) {
+  await requireAdmin();
   let runId: string;
 
   try {
@@ -234,6 +257,7 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
   let runId: string;
 
   try {
+    const actor = await requireAdmin();
     const selection = liveRunSchema.parse({
       projectId,
       keywordId: stringFromForm(formData.get("keywordId")),
@@ -243,7 +267,14 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
       pageLimit: stringFromForm(formData.get("pageLimit")),
       confirmLiveCost: stringFromForm(formData.get("confirmLiveCost"))
     });
-    runId = await executeLiveRankRun(selection);
+    runId = await enqueueVerification({
+      projectId: selection.projectId,
+      keywordIds: [selection.keywordId],
+      locationIds: [selection.locationId],
+      devices: [selection.device],
+      searchTypes: [selection.searchType],
+      pageLimit: selection.pageLimit
+    }, actor.email);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the live verification.";
     redirect(`/projects/${projectId}?liveError=${encodeURIComponent(message)}`);
@@ -252,6 +283,35 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
   revalidatePath("/");
   revalidatePath("/runs");
   revalidatePath(`/projects/${projectId}`);
+  redirect(`/runs/${runId}`);
+}
+
+export async function updateProjectSchedule(projectId: string, formData: FormData) {
+  await requireAdmin();
+  const data = scheduleSchema.parse({
+    scheduleEnabled: formData.get("scheduleEnabled") === "on",
+    scheduleDay: stringFromForm(formData.get("scheduleDay")),
+    scheduleDevices: stringListFromForm(formData, "scheduleDevices"),
+    scheduleSearchTypes: stringListFromForm(formData, "scheduleSearchTypes"),
+    schedulePageLimit: stringFromForm(formData.get("schedulePageLimit"))
+  });
+  await prisma.project.update({ where: { id: projectId }, data });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function queueProjectRerun(clientId: string, formData: FormData) {
+  let runId: string;
+  try {
+    const actor = await currentActor();
+    const projectId = stringFromForm(formData.get("projectId"));
+    runId = await enqueueProjectRerun({ projectId, requestedByEmail: actor.email, role: actor.role });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to queue the report.";
+    redirect(`/clients/${clientId}?queueError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/runs");
+  revalidatePath(`/clients/${clientId}`);
   redirect(`/runs/${runId}`);
 }
 

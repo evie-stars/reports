@@ -12,12 +12,14 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "rank:sandbox": "tsx scripts/run-rank-check.ts --sandbox",
-    "rank:live": "tsx scripts/run-rank-check.ts --live"
+    "rank:live": "tsx scripts/run-rank-check.ts --live",
+    "rank:worker": "tsx scripts/process-rank-queue.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
     "csv-parse": "^7.0.2",
     "next": "^16.3.4",
+    "next-auth": "^5.0.0-beta.32",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.25.0"

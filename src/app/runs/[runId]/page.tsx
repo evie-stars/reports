@@ -29,7 +29,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
       <header className="page-header">
         <div>
           <p className="breadcrumb">
-            <Link href="/runs">Rank Runs</Link> / <Link href={`/projects/${run.project.id}`}>{run.project.name}</Link>
+            <Link href="/runs">Rank Runs</Link> / <Link href={`/clients/${run.project.client.id}`}>{run.project.name}</Link>
           </p>
           <h2>{run.sandbox ? "Sandbox Run" : "Live Run"}</h2>
           <p>{run.project.client.name} / {run.project.name} · {run.createdAt.toLocaleString("en-GB")}</p>
@@ -41,6 +41,12 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
         <div className="notice danger-notice">
           <strong>{failedRequests.length} request{failedRequests.length === 1 ? "" : "s"} failed.</strong>
           <span> Review the API audit below for the response from DataForSEO.</span>
+        </div>
+      ) : null}
+
+      {run.status === "queued" ? (
+        <div className="notice">
+          <strong>Report queued.</strong> The Plesk worker will process it in order; refresh this page after the next worker run.
         </div>
       ) : null}
 

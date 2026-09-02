@@ -17,8 +17,8 @@ export function ClientReportDashboard({
   return (
     <>
       <section className="report-stat-grid" aria-label="Ranking summary">
-        <ReportStat label="Page 1 Keywords" value={stats.pageOne} detail={`of ${stats.activeKeywords} active`} tone="green" />
         <ReportStat label="Top 3 Keywords" value={stats.topThree} detail="Highest visibility" tone="blue" />
+        <ReportStat label="Page 1 Keywords" value={stats.pageOne} detail={`of ${stats.activeKeywords} active`} tone="green" />
         <ReportStat label="Top 20 Keywords" value={stats.topTwenty} detail="Within two pages" tone="dark" />
         <ReportStat
           label="Average Position"

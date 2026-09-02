@@ -148,6 +148,7 @@ export async function importRankHistoryCsv(csvText: string, options?: { clientNa
         startedAt: date,
         completedAt: date,
         sandbox: false,
+        source: "import",
         requestedTasks: history.rows.filter((row) => row.snapshots.some((snapshot) => sameInstant(snapshot.checkedAt, date))).length,
         actualCostUsd: 0,
         notes: "Imported historical ranking data",

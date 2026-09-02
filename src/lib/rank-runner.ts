@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { MAX_SANDBOX_TASKS } from "@/lib/rank-config";
 import { parseDataForSeoItems, ParsedRankItem } from "@/lib/rank-parser";
 
-export type SandboxRunSelection = {
+export type RankRunSelection = {
   projectId: string;
   keywordIds: string[];
   locationIds: string[];
@@ -12,8 +12,10 @@ export type SandboxRunSelection = {
   searchTypes: SearchType[];
 };
 
+export type SandboxRunSelection = RankRunSelection;
+
 export async function executeSandboxRankRun(selection: SandboxRunSelection) {
-  return executeRankRun(selection, "sandbox");
+  return executeRankRun(selection, "sandbox", 1);
 }
 
 export async function executeLiveRankRun(selection: {
@@ -37,7 +39,16 @@ export async function executeLiveRankRun(selection: {
   );
 }
 
-async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMode, livePageLimit = 1) {
+export async function executeQueuedRankRun(runId: string, selection: RankRunSelection, pageLimit: number) {
+  return executeRankRun(selection, "live", pageLimit, runId);
+}
+
+async function executeRankRun(
+  selection: RankRunSelection,
+  mode: DataForSeoMode,
+  livePageLimit = 1,
+  existingRunId?: string
+) {
   const project = await prisma.project.findUnique({
     where: { id: selection.projectId },
     include: {
@@ -65,16 +76,8 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
     throw new Error(`Sandbox batch limited to ${MAX_SANDBOX_TASKS} tasks. Reduce the selection and run another batch.`);
   }
 
-  if (mode === "live" && requestedTasks !== 1) {
-    throw new Error("Live verification is restricted to exactly one task.");
-  }
-
   if (mode === "live" && (!Number.isInteger(livePageLimit) || livePageLimit < 1 || livePageLimit > 10)) {
     throw new Error("Live page depth must be between 1 and 10 pages.");
-  }
-
-  if (mode === "live" && selection.searchTypes[0] !== "organic" && livePageLimit !== 1) {
-    throw new Error("Multi-page live verification is currently restricted to Organic results.");
   }
 
   if (mode === "live" && project.keywords.some((keyword) => hasCostMultiplyingOperator(keyword.phrase))) {
@@ -83,18 +86,25 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
 
   const client = new DataForSeoClient();
   client.assertSafeToRun(mode, requestedTasks);
-  const modeLabel = mode === "sandbox" ? "Sandbox" : "Live verification";
+  const modeLabel = mode === "sandbox" ? "Sandbox" : existingRunId ? "Queued live report" : "Live verification";
 
-  const run = await prisma.rankRun.create({
-    data: {
-      projectId: project.id,
-      status: "running",
-      sandbox: mode === "sandbox",
-      startedAt: new Date(),
-      requestedTasks,
-      notes: `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s)${mode === "live" ? `, up to ${livePageLimit} result page(s)` : ""}.`
-    }
-  });
+  const runNotes = `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s)${mode === "live" ? `, up to ${livePageLimit} organic result page(s)` : ""}.`;
+  const run = existingRunId
+    ? await prisma.rankRun.update({
+        where: { id: existingRunId },
+        data: { status: "running", sandbox: false, startedAt: new Date(), requestedTasks, notes: runNotes }
+      })
+    : await prisma.rankRun.create({
+        data: {
+          projectId: project.id,
+          status: "running",
+          sandbox: mode === "sandbox",
+          source: mode === "sandbox" ? "sandbox" : "verification",
+          startedAt: new Date(),
+          requestedTasks,
+          notes: runNotes
+        }
+      });
 
   let completedTasks = 0;
   let failedTasks = 0;
@@ -132,6 +142,7 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
 
             if (responseError) {
               failedTasks += 1;
+              if (mode === "live") await pauseBetweenTasks();
               continue;
             }
 
@@ -196,6 +207,8 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
               });
             }
           }
+
+          if (mode === "live") await pauseBetweenTasks();
         }
       }
     }
@@ -215,6 +228,12 @@ async function executeRankRun(selection: SandboxRunSelection, mode: DataForSeoMo
   });
 
   return run.id;
+}
+
+async function pauseBetweenTasks() {
+  const configured = Number.parseInt(process.env.RANK_QUEUE_DELAY_MS ?? "750", 10);
+  const milliseconds = Number.isFinite(configured) ? Math.max(0, Math.min(configured, 30_000)) : 750;
+  if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function buildDataForSeoTask(

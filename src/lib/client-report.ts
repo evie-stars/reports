@@ -150,7 +150,7 @@ function normalizeFilters(params: ReportSearchParams): ReportFilters {
     searchType: params.type === "organic" || params.type === "local_finder" || params.type === "maps" ? params.type : undefined,
     group: clean(params.group),
     keywordId: clean(params.keyword),
-    sort: params.sort === "area" || params.sort === "current" ? params.sort : "keyword",
+    sort: params.sort === "keyword" || params.sort === "area" ? params.sort : "current",
     sortDirection: params.dir === "desc" ? "desc" : "asc"
   };
 }

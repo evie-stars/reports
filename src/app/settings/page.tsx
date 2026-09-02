@@ -1,12 +1,18 @@
 import { Icon } from "@/components/icon";
+import { redirect } from "next/navigation";
+import { currentActor } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const actor = await currentActor();
+  if (actor.role !== "admin") redirect("/");
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const maxLiveTasks = process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1";
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const authEnabled = process.env.AUTH_ENABLED === "true";
+  const allowedAccessConfigured = Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
 
   return (
     <>
@@ -37,6 +43,30 @@ export default function SettingsPage() {
               <tr>
                 <th>Max Live Tasks</th>
                 <td>{maxLiveTasks}</td>
+              </tr>
+              <tr>
+                <th>Queue Delay</th>
+                <td>{process.env.RANK_QUEUE_DELAY_MS ?? "750"} ms</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="card">
+          <p className="label label-with-icon"><Icon name="contacts" />Access</p>
+          <table className="table">
+            <tbody>
+              <tr>
+                <th>Google Sign-in</th>
+                <td><span className={authEnabled ? "status good" : "status warn"}>{authEnabled ? "Enabled" : "Setup required"}</span></td>
+              </tr>
+              <tr>
+                <th>Access Allowlist</th>
+                <td><span className={allowedAccessConfigured ? "status good" : "status danger"}>{allowedAccessConfigured ? "Configured" : "Missing"}</span></td>
+              </tr>
+              <tr>
+                <th>Sales Cooldown</th>
+                <td>{process.env.RANK_SALES_COOLDOWN_DAYS ?? "7"} days</td>
               </tr>
             </tbody>
           </table>

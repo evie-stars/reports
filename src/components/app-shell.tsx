@@ -5,10 +5,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@/components/icon";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  accountControl,
+  appRole
+}: {
+  children: React.ReactNode;
+  accountControl?: React.ReactNode;
+  appRole?: "admin" | "sales";
+}) {
   const pathname = usePathname();
 
-  if (pathname.startsWith("/share/")) {
+  if (pathname.startsWith("/share/") || pathname === "/login") {
     return <main className="shared-main">{children}</main>;
   }
 
@@ -30,13 +38,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/"><Icon name="home" />Dashboard</Link>
           <Link href="/clients"><Icon name="contacts" />Clients</Link>
           <Link href="/runs"><Icon name="graph" />Rank Runs</Link>
-          <Link href="/settings"><Icon name="settings" />Settings</Link>
+          {appRole !== "sales" ? <Link href="/settings"><Icon name="settings" />Settings</Link> : null}
         </nav>
       </aside>
       <main>
         <div className="topbar">
           <span>reports.starwebsites.co.uk</span>
-          <span className="status good">API guardrails active</span>
+          <div className="topbar-actions">
+            <span className="status good">API guardrails active</span>
+            {accountControl}
+          </div>
         </div>
         {children}
       </main>

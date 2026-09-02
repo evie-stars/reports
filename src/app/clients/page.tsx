@@ -3,6 +3,7 @@ import { createClient, importRankHistory } from "@/app/actions";
 import { ClientTable } from "@/components/client-table";
 import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
+import { currentActor } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export default async function ClientsPage({
   searchParams: Promise<{ new?: string; import?: string; importError?: string }>;
 }) {
   const { new: showNewClient, import: showImport, importError } = await searchParams;
+  const actor = await currentActor();
+  const canEdit = actor.role === "admin";
   const { clients, dbUnavailable } = await getClientsData();
 
   return (
@@ -21,14 +24,14 @@ export default async function ClientsPage({
           <h2>Clients</h2>
           <p>Open a client to view their latest report.</p>
         </div>
-        <div className="page-header-actions">
+        {canEdit ? <div className="page-header-actions">
           <Link className="button button-secondary" href={showImport ? "/clients" : "/clients?import=1"}>
             {showImport ? "Close Import" : "Import History"}
           </Link>
           <Link className="button" href={showNewClient ? "/clients" : "/clients?new=1"}>
             {showNewClient ? "Close" : "Add Client"}
           </Link>
-        </div>
+        </div> : null}
       </header>
 
       {dbUnavailable ? (
@@ -38,7 +41,7 @@ export default async function ClientsPage({
         </div>
       ) : null}
 
-      {showNewClient ? (
+      {canEdit && showNewClient ? (
         <form className="card form compact-create-form" action={createClient}>
           <p className="label label-with-icon"><Icon name="contacts" />New Client</p>
           <div className="form-row client-create-fields">
@@ -55,7 +58,7 @@ export default async function ClientsPage({
         </form>
       ) : null}
 
-      {showImport ? (
+      {canEdit && showImport ? (
         <form className="card form history-import-form" action={importRankHistory}>
           <div className="history-import-heading">
             <div>

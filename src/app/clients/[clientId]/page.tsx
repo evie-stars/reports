@@ -1,20 +1,23 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   createProject,
   disableClientShare,
   enableClientShare,
+  queueProjectRerun,
   updateClient
 } from "@/app/actions";
 import { ClientReportDashboard } from "@/components/client-report-dashboard";
 import { CopyShareLink } from "@/components/copy-share-link";
+import { CopyShareButton } from "@/components/copy-share-button";
 import { Icon } from "@/components/icon";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
+import { currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-type ClientPageSearchParams = ReportSearchParams & { view?: string };
+type ClientPageSearchParams = ReportSearchParams & { view?: string; queueError?: string };
 
 export default async function ClientDetailPage({ params, searchParams }: {
   params: Promise<{ clientId: string }>;
@@ -22,7 +25,9 @@ export default async function ClientDetailPage({ params, searchParams }: {
 }) {
   const { clientId } = await params;
   const resolvedSearchParams = await searchParams;
+  const actor = await currentActor();
   const settingsOpen = resolvedSearchParams.view === "settings";
+  if (settingsOpen && actor.role !== "admin") redirect(`/clients/${clientId}`);
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     include: {
@@ -45,7 +50,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
 
     return (
       <>
-        <ClientHeader clientId={client.id} clientName={client.name} settingsOpen />
+        <ClientHeader clientId={client.id} clientName={client.name} settingsOpen role={actor.role} />
         <section className="settings-panel">
           <div className="grid two">
             <form className="card form" action={updateClientWithId}>
@@ -120,13 +125,39 @@ export default async function ClientDetailPage({ params, searchParams }: {
 
   return (
     <>
-      <ClientHeader clientId={client.id} clientName={client.name} />
+      <ClientHeader
+        clientId={client.id}
+        clientName={client.name}
+        projects={client.projects.map(({ id, name }) => ({ id, name }))}
+        role={actor.role}
+        shareEnabled={client.shareEnabled}
+        shareToken={client.shareToken}
+      />
+      {resolvedSearchParams.queueError ? <div className="notice danger-notice"><strong>Report not queued.</strong> {resolvedSearchParams.queueError}</div> : null}
       <ClientReportDashboard data={reportData} basePath={`/clients/${client.id}`} />
     </>
   );
 }
 
-function ClientHeader({ clientId, clientName, settingsOpen = false }: { clientId: string; clientName: string; settingsOpen?: boolean }) {
+function ClientHeader({
+  clientId,
+  clientName,
+  projects = [],
+  role,
+  settingsOpen = false,
+  shareEnabled = false,
+  shareToken = null
+}: {
+  clientId: string;
+  clientName: string;
+  projects?: Array<{ id: string; name: string }>;
+  role: "admin" | "sales";
+  settingsOpen?: boolean;
+  shareEnabled?: boolean;
+  shareToken?: string | null;
+}) {
+  const queueRerun = queueProjectRerun.bind(null, clientId);
+  const enableShare = enableClientShare.bind(null, clientId);
   return (
     <header className="page-header client-report-header">
       <div>
@@ -134,14 +165,32 @@ function ClientHeader({ clientId, clientName, settingsOpen = false }: { clientId
         <h2>{clientName}</h2>
         <p>{settingsOpen ? "Client and report settings" : "Local search performance report"}</p>
       </div>
-      <Link
-        className={settingsOpen ? "button button-secondary" : "icon-text-button"}
-        href={settingsOpen ? `/clients/${clientId}` : `/clients/${clientId}?view=settings`}
-        title={settingsOpen ? "Return to report" : "Edit report settings"}
-      >
-        {!settingsOpen ? <Icon name="edit" /> : null}
-        {settingsOpen ? "View Report" : "Edit Report"}
-      </Link>
+      <div className="page-header-actions">
+        {!settingsOpen && shareEnabled && shareToken ? <CopyShareButton path={`/share/${shareToken}`} /> : null}
+        {!settingsOpen && !shareEnabled && role === "admin" ? (
+          <form action={enableShare}><button className="button button-secondary" type="submit">Create Client Link</button></form>
+        ) : null}
+        {!settingsOpen && projects.length > 0 ? (
+          <form className="rerun-form" action={queueRerun}>
+            {projects.length === 1 ? <input type="hidden" name="projectId" value={projects[0].id} /> : (
+              <select name="projectId" aria-label="Report to re-run" required>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            )}
+            <button className="button" type="submit">Queue Re-run</button>
+          </form>
+        ) : null}
+        {role === "admin" ? (
+          <Link
+            className={settingsOpen ? "button button-secondary" : "icon-text-button"}
+            href={settingsOpen ? `/clients/${clientId}` : `/clients/${clientId}?view=settings`}
+            title={settingsOpen ? "Return to report" : "Edit report settings"}
+          >
+            {!settingsOpen ? <Icon name="edit" /> : null}
+            {settingsOpen ? "View Report" : "Edit Report"}
+          </Link>
+        ) : null}
+      </div>
     </header>
   );
 }

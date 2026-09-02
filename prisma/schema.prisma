@@ -26,6 +26,14 @@ enum RankRunStatus {
   blocked
 }
 
+enum RankRunSource {
+  sandbox
+  verification
+  manual
+  scheduled
+  import
+}
+
 enum RankDirection {
   up
   down
@@ -52,6 +60,11 @@ model Project {
   domain             String
   targetBusinessName String?
   serviceArea        String?
+  scheduleEnabled    Boolean      @default(false)
+  scheduleDay        Int          @default(1)
+  scheduleDevices    Device[]     @default([desktop])
+  scheduleSearchTypes SearchType[] @default([organic])
+  schedulePageLimit  Int          @default(10)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
   client             Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -115,6 +128,10 @@ model RankRun {
   startedAt      DateTime?
   completedAt    DateTime?
   sandbox        Boolean       @default(true)
+  source         RankRunSource @default(sandbox)
+  selection      Json?
+  requestedByEmail String?
+  availableAt    DateTime      @default(now())
   requestedTasks Int           @default(0)
   actualCostUsd  Decimal       @default(0) @db.Decimal(10, 6)
   notes          String?
@@ -124,6 +141,14 @@ model RankRun {
   results        RankResult[]
 
   @@index([projectId, createdAt])
+  @@index([status, availableAt, createdAt])
+}
+
+model SystemLock {
+  key         String   @id
+  owner       String?
+  lockedUntil DateTime
+  updatedAt   DateTime @updatedAt
 }
 
 model RankResult {

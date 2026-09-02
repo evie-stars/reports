@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   createKeywords,
+  updateProjectSchedule,
   updateKeywordActive,
   updateLocationActive,
   updateProject
@@ -11,6 +12,7 @@ import { Icon } from "@/components/icon";
 import { LiveRunForm } from "@/components/live-run-form";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
+import { currentActor } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,7 @@ export default async function ProjectDetailPage({
 }) {
   const { projectId } = await params;
   const { sandboxError, liveError } = await searchParams;
+  const actor = await currentActor();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -34,8 +37,10 @@ export default async function ProjectDetailPage({
   });
 
   if (!project) notFound();
+  if (actor.role !== "admin") redirect(`/clients/${project.clientId}`);
 
   const updateProjectWithId = updateProject.bind(null, project.id);
+  const updateScheduleWithId = updateProjectSchedule.bind(null, project.id);
   const activeKeywords = project.keywords.filter((keyword) => keyword.active);
   const activeLocations = project.locations.filter((location) => location.active);
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
@@ -89,6 +94,54 @@ export default async function ProjectDetailPage({
           </div>
         </div>
       </section>
+
+      <form className="card form schedule-card spaced-section" action={updateScheduleWithId}>
+        <div className="section-heading compact-heading">
+          <div>
+            <p className="label label-with-icon"><Icon name="settings" />Monthly Schedule</p>
+            <h3>Automated rank report</h3>
+          </div>
+          <label className="toggle-field">
+            <input name="scheduleEnabled" type="checkbox" defaultChecked={project.scheduleEnabled} />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div className="schedule-grid">
+          <label>
+            Day of month
+            <select name="scheduleDay" defaultValue={project.scheduleDay}>
+              {Array.from({ length: 28 }, (_, index) => index + 1).map((day) => <option key={day} value={day}>{day}</option>)}
+            </select>
+          </label>
+          <label>
+            Organic result pages
+            <select name="schedulePageLimit" defaultValue={project.schedulePageLimit}>
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((page) => <option key={page} value={page}>{page}</option>)}
+            </select>
+          </label>
+          <fieldset className="choice-group">
+            <legend>Devices</legend>
+            <div className="choice-list horizontal">
+              <label><input name="scheduleDevices" type="checkbox" value="desktop" defaultChecked={project.scheduleDevices.includes("desktop")} />Desktop</label>
+              <label><input name="scheduleDevices" type="checkbox" value="mobile" defaultChecked={project.scheduleDevices.includes("mobile")} />Mobile</label>
+            </div>
+          </fieldset>
+          <fieldset className="choice-group">
+            <legend>Results</legend>
+            <div className="choice-list horizontal">
+              <label><input name="scheduleSearchTypes" type="checkbox" value="organic" defaultChecked={project.scheduleSearchTypes.includes("organic")} />Organic</label>
+              <label><input name="scheduleSearchTypes" type="checkbox" value="local_finder" defaultChecked={project.scheduleSearchTypes.includes("local_finder")} />Local Finder</label>
+              <label><input name="scheduleSearchTypes" type="checkbox" value="maps" defaultChecked={project.scheduleSearchTypes.includes("maps")} />Maps</label>
+            </div>
+          </fieldset>
+        </div>
+        <div className="schedule-footer">
+          <p className="muted form-note">
+            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * project.scheduleSearchTypes.length} paid task(s). Worker limit: {process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1"}.
+          </p>
+          <button className="button" type="submit">Save Schedule</button>
+        </div>
+      </form>
 
       <section style={{ marginTop: 18 }}>
         <SandboxRunForm
