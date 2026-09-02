@@ -1,5 +1,7 @@
 import { Icon } from "@/components/icon";
 
+export const dynamic = "force-dynamic";
+
 export default function SettingsPage() {
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
