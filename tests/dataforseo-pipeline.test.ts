@@ -4,6 +4,7 @@ import { DataForSeoClient } from "../src/lib/dataforseo";
 import { estimateRankRunCost } from "../src/lib/dataforseo-costs";
 import { readKeywordMetrics } from "../src/lib/keyword-metrics";
 import { buildRankMatrix } from "../src/components/rank-matrix";
+import { countPositionBuckets } from "../src/lib/client-report";
 import { readTaskState } from "../src/lib/rank-standard";
 
 test("estimates Standard SERP pages before a report is queued", () => {
@@ -97,4 +98,14 @@ test("groups result types and devices into one ranking row per keyword and area"
   assert.equal(matrix.rows.length, 1);
   assert.deepEqual(matrix.columns.map((column) => column.key), ["organic:desktop", "organic:mobile", "maps:desktop"]);
   assert.equal(matrix.rows[0].cells["maps:desktop"].rank, 2);
+});
+
+test("counts keyword positions in the correct distribution bands", () => {
+  assert.deepEqual(countPositionBuckets([1, 2, 3, 4, 10, 11, 20, 21, null]), {
+    first: 1,
+    twoToThree: 2,
+    fourToTen: 2,
+    elevenToTwenty: 2,
+    beyondTwenty: 2
+  });
 });

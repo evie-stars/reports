@@ -262,7 +262,19 @@ function buildTrend(resultsDescending: ResultShape[], period: ReportFilters["per
     ? null
     : new Date(latestCheck.getTime() - Number(period) * 24 * 60 * 60 * 1000);
   const current = new Map<string, ResultShape>();
-  const points: Array<{ date: string; label: string; pageOne: number; topThree: number; averageRank: number | null }> = [];
+  const points: Array<{
+    date: string;
+    label: string;
+    first: number;
+    twoToThree: number;
+    fourToTen: number;
+    elevenToTwenty: number;
+    beyondTwenty: number;
+    total: number;
+    pageOne: number;
+    topThree: number;
+    averageRank: number | null;
+  }> = [];
 
   for (const [day, entries] of days) {
     entries.forEach((entry) => current.set(resultKey(entry), entry));
@@ -270,29 +282,43 @@ function buildTrend(resultsDescending: ResultShape[], period: ReportFilters["per
     if (cutoff && date < cutoff) continue;
 
     const currentValues = Array.from(current.values());
-    const pageOne = new Set<string>();
-    const topThree = new Set<string>();
-    const ranks: number[] = [];
+    const bestRankByKeyword = new Map<string, number | null>();
     currentValues.forEach((result) => {
       const rank = result.rankAbsolute ?? result.rankGroup;
-      if (rank === null) return;
-      ranks.push(rank);
-      if (rank <= 10) pageOne.add(result.keywordId);
-      if (rank <= 3) topThree.add(result.keywordId);
+      const key = `${result.run.projectId}:${result.keywordId}`;
+      const currentBest = bestRankByKeyword.get(key);
+      if (!bestRankByKeyword.has(key) || (rank !== null && (currentBest === null || currentBest === undefined || rank < currentBest))) {
+        bestRankByKeyword.set(key, rank);
+      }
     });
+    const ranks = Array.from(bestRankByKeyword.values());
+    const ranked = ranks.filter((rank): rank is number => rank !== null);
+    const buckets = countPositionBuckets(ranks);
 
     points.push({
       date: day,
       label: date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
-      pageOne: pageOne.size,
-      topThree: topThree.size,
-      averageRank: ranks.length ? Number((ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length).toFixed(1)) : null
+      ...buckets,
+      total: ranks.length,
+      pageOne: buckets.first + buckets.twoToThree + buckets.fourToTen,
+      topThree: buckets.first + buckets.twoToThree,
+      averageRank: ranked.length ? Number((ranked.reduce((sum, rank) => sum + rank, 0) / ranked.length).toFixed(1)) : null
     });
   }
 
   if (points.length <= 16) return points;
   const step = (points.length - 1) / 15;
   return Array.from({ length: 16 }, (_, index) => points[Math.round(index * step)]);
+}
+
+export function countPositionBuckets(ranks: Array<number | null>) {
+  return {
+    first: ranks.filter((rank) => rank === 1).length,
+    twoToThree: ranks.filter((rank) => rank !== null && rank >= 2 && rank <= 3).length,
+    fourToTen: ranks.filter((rank) => rank !== null && rank >= 4 && rank <= 10).length,
+    elevenToTwenty: ranks.filter((rank) => rank !== null && rank >= 11 && rank <= 20).length,
+    beyondTwenty: ranks.filter((rank) => rank === null || rank > 20).length
+  };
 }
 
 function resultKey(result: Pick<ResultShape, "keywordId" | "locationId" | "searchType" | "device" | "run">) {

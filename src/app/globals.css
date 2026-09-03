@@ -1407,17 +1407,18 @@ button.status:hover {
   width: 100%;
 }
 
-.chart-legend {
+.position-chart-legend {
   display: flex;
+  flex-wrap: wrap;
   font-size: 11px;
   font-weight: 600;
-  gap: 18px;
+  gap: 8px 16px;
   justify-content: flex-end;
   margin: -4px 2px 2px;
 }
 
-.chart-legend span::before {
-  border-radius: 50%;
+.position-chart-legend span::before {
+  border-radius: 2px;
   content: "";
   display: inline-block;
   height: 8px;
@@ -1425,12 +1426,53 @@ button.status:hover {
   width: 8px;
 }
 
-.chart-legend .page-one::before {
-  background: var(--light-blue);
+.position-chart-legend .first::before,
+.position-bar.first {
+  background: var(--dark-blue);
+  fill: var(--dark-blue);
 }
 
-.chart-legend .top-three::before {
+.position-chart-legend .two-three::before,
+.position-bar.two-three {
+  background: var(--light-blue);
+  fill: var(--light-blue);
+}
+
+.position-chart-legend .four-ten::before,
+.position-bar.four-ten {
   background: var(--green);
+  fill: var(--green);
+}
+
+.position-chart-legend .eleven-twenty::before,
+.position-bar.eleven-twenty {
+  background: #9bcfba;
+  fill: #9bcfba;
+}
+
+.position-chart-legend .beyond-twenty::before,
+.position-bar.beyond-twenty {
+  background: #dfe5ea;
+  fill: #dfe5ea;
+}
+
+.position-bar {
+  animation: position-bar-in 480ms var(--ease-out) both;
+  cursor: help;
+  opacity: 0.96;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  transition: filter 150ms ease, opacity 150ms ease;
+}
+
+.position-bar:hover {
+  filter: saturate(1.1) brightness(0.96);
+  opacity: 1;
+}
+
+@keyframes position-bar-in {
+  from { opacity: 0; transform: scaleY(0.08); }
+  to { opacity: 0.96; transform: scaleY(1); }
 }
 
 .chart-grid-line {

@@ -35,7 +35,7 @@ export function ClientReportDashboard({
         <div className="section-heading report-section-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Ranking Progress</p>
-            <h3>Search visibility over time</h3>
+            <h3>Keyword position distribution</h3>
           </div>
           <div className="movement-summary" aria-label="Latest movement summary">
             <span className="movement-count up">{stats.improved} improved</span>
@@ -44,7 +44,7 @@ export function ClientReportDashboard({
             {stats.issues ? <span className="movement-count issue">{stats.issues} URL flags</span> : null}
           </div>
         </div>
-        <PageOneTrendChart points={data.trend} />
+        <PositionDistributionChart points={data.trend} />
       </section>
 
       <form className="report-filters spaced-section" action={basePath} method="get">
@@ -185,42 +185,71 @@ function toMatrixResult(result: CurrentReportResult): RankMatrixResult {
   };
 }
 
-function PageOneTrendChart({ points }: { points: ClientReportData["trend"] }) {
+function PositionDistributionChart({ points }: { points: ClientReportData["trend"] }) {
   if (points.length < 2) {
     return <div className="chart-empty">A progress chart will appear after at least two check dates in this period.</div>;
   }
 
   const width = 900;
-  const height = 250;
-  const padding = { top: 24, right: 28, bottom: 42, left: 42 };
-  const maxValue = Math.max(1, ...points.map((point) => Math.max(point.pageOne, point.topThree)));
-  const x = (index: number) => padding.left + index * ((width - padding.left - padding.right) / (points.length - 1));
-  const y = (value: number) => height - padding.bottom - value * ((height - padding.top - padding.bottom) / maxValue);
-  const pageOnePath = points.map((point, index) => `${index ? "L" : "M"}${x(index)},${y(point.pageOne)}`).join(" ");
-  const topThreePath = points.map((point, index) => `${index ? "L" : "M"}${x(index)},${y(point.topThree)}`).join(" ");
-  const gridValues = Array.from(new Set([0, Math.ceil(maxValue / 2), maxValue]));
+  const height = 270;
+  const padding = { top: 18, right: 18, bottom: 42, left: 38 };
+  const maxTotal = Math.max(1, ...points.map((point) => point.total));
+  const plotWidth = width - padding.left - padding.right;
+  const slotWidth = plotWidth / points.length;
+  const barWidth = Math.min(72, Math.max(22, slotWidth * 0.54));
+  const y = (value: number) => height - padding.bottom - value * ((height - padding.top - padding.bottom) / maxTotal);
+  const gridValues = Array.from(new Set([0, Math.ceil(maxTotal / 2), maxTotal]));
+  const buckets = [
+    { key: "beyondTwenty", label: "#21+", className: "beyond-twenty" },
+    { key: "elevenToTwenty", label: "#11-20", className: "eleven-twenty" },
+    { key: "fourToTen", label: "#4-10", className: "four-ten" },
+    { key: "twoToThree", label: "#2-3", className: "two-three" },
+    { key: "first", label: "#1", className: "first" }
+  ] as const;
 
   return (
-    <div className="trend-chart-wrap">
-      <div className="chart-legend"><span className="page-one">Page 1</span><span className="top-three">Top 3</span></div>
-      <svg className="trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Page one and top three keyword rankings over time">
+    <div className="trend-chart-wrap position-chart-wrap">
+      <div className="position-chart-legend">
+        {[...buckets].reverse().map((bucket) => <span className={bucket.className} key={bucket.key}>{bucket.label}</span>)}
+      </div>
+      <svg className="trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Tracked keywords grouped into position ranges over time">
         {gridValues.map((value) => (
           <g key={value}>
             <line x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} className="chart-grid-line" />
             <text x={padding.left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{value}</text>
           </g>
         ))}
-        <path d={pageOnePath} className="chart-line page-one" />
-        <path d={topThreePath} className="chart-line top-three" />
-        {points.map((point, index) => (
-          <g key={point.date}>
-            <circle cx={x(index)} cy={y(point.pageOne)} r="4" className="chart-point page-one"><title>{point.label}: {point.pageOne} page-one keywords</title></circle>
-            <circle cx={x(index)} cy={y(point.topThree)} r="4" className="chart-point top-three"><title>{point.label}: {point.topThree} top-three keywords</title></circle>
-            {(index === 0 || index === points.length - 1 || index % Math.ceil(points.length / 5) === 0) ? (
-              <text x={x(index)} y={height - 14} textAnchor="middle" className="chart-axis-label">{point.label}</text>
-            ) : null}
-          </g>
-        ))}
+        {points.map((point, index) => {
+          const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
+          let accumulated = 0;
+          return (
+            <g key={point.date}>
+              {buckets.map((bucket) => {
+                const count = point[bucket.key];
+                const start = accumulated;
+                accumulated += count;
+                if (count === 0) return null;
+                const percentage = point.total ? Math.round((count / point.total) * 100) : 0;
+                return (
+                  <rect
+                    className={`position-bar ${bucket.className}`}
+                    height={y(start) - y(accumulated)}
+                    key={bucket.key}
+                    style={{ animationDelay: `${120 + index * 45}ms` }}
+                    width={barWidth}
+                    x={x}
+                    y={y(accumulated)}
+                  >
+                    <title>{point.label} · {bucket.label}: {count} keyword{count === 1 ? "" : "s"} ({percentage}%)</title>
+                  </rect>
+                );
+              })}
+              {(index === 0 || index === points.length - 1 || index % Math.ceil(points.length / 6) === 0) ? (
+                <text x={x + barWidth / 2} y={height - 14} textAnchor="middle" className="chart-axis-label">{point.label}</text>
+              ) : null}
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
