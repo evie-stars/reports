@@ -862,54 +862,73 @@ button.status:hover {
   text-align: center !important;
 }
 
-.matrix-rank {
+.matrix-result {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.matrix-position {
   align-items: center;
   background: var(--surface-strong);
   border-radius: 5px;
   display: inline-flex;
-  gap: 4px;
   justify-content: center;
   min-height: 24px;
-  min-width: 46px;
+  min-width: 34px;
   padding: 3px 5px;
-  position: relative;
   transition: background-color 150ms ease, transform 150ms ease;
 }
 
-.matrix-rank:hover {
+.matrix-position:hover {
   transform: translateY(-1px);
 }
 
-.matrix-rank.up,
-.matrix-rank.new {
+.matrix-position.up,
+.matrix-position.new {
   background: #e0f2e9;
   color: #287a50;
 }
 
-.matrix-rank.down {
+.matrix-position.down {
   background: #fde8e6;
   color: #b92e27;
 }
 
-.matrix-rank > a,
-.matrix-rank > span {
+.matrix-position > a,
+.matrix-position > span {
   color: inherit !important;
   font-size: 11px;
   font-weight: 700 !important;
   line-height: 1;
 }
 
-.matrix-rank > a:hover {
+.matrix-position > a:hover {
   text-decoration: underline;
 }
 
-.matrix-rank small {
+.matrix-movement {
+  border-radius: 999px;
   font-size: 8px;
   font-weight: 700;
   line-height: 1;
+  padding: 3px 5px;
+  white-space: nowrap;
 }
 
-.matrix-rank i {
+.matrix-movement.up,
+.matrix-movement.new {
+  background: #e0f2e9;
+  color: #287a50;
+}
+
+.matrix-movement.down {
+  background: #fde8e6;
+  color: #b92e27;
+}
+
+.matrix-issue {
   align-items: center;
   background: #f4bd5c;
   border-radius: 50%;

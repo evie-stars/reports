@@ -76,14 +76,12 @@ export function RankMatrix({
   emptyMessage,
   keywordHref,
   showChecked = false,
-  showProject = false,
   showVolume = false
 }: {
   results: RankMatrixResult[];
   emptyMessage: string;
   keywordHref?: (keywordId: string) => string;
   showChecked?: boolean;
-  showProject?: boolean;
   showVolume?: boolean;
 }) {
   const { columns, rows } = buildRankMatrix(results);
@@ -113,7 +111,6 @@ export function RankMatrix({
                 {keywordHref ? (
                   <Link className="keyword-history-link" href={keywordHref(row.keywordId)} scroll={false}>{row.keyword}</Link>
                 ) : <strong>{row.keyword}</strong>}
-                {showProject && row.projectName ? <small className="row-context">{row.projectName}</small> : null}
               </td>
               <td>{row.location}</td>
               {showVolume ? <td>{row.searchVolume?.toLocaleString("en-GB") ?? "-"}</td> : null}
@@ -141,12 +138,14 @@ export function RankMatrixRank({ result }: { result: RankMatrixResult }) {
   const rank = result.rank ?? "-";
 
   return (
-    <div className={`matrix-rank ${state}`} title={title}>
-      {result.matchedUrl ? (
-        <a href={result.matchedUrl} target="_blank" rel="noreferrer" aria-label={`${title}. Open ranked page.`}>{rank}</a>
-      ) : <span>{rank}</span>}
-      {movement ? <small>{movement}</small> : null}
-      {result.issues?.length ? <i aria-label={result.issues.join(", ")}>!</i> : null}
+    <div className="matrix-result" title={title}>
+      <span className={`matrix-position ${state}`}>
+        {result.matchedUrl ? (
+          <a href={result.matchedUrl} target="_blank" rel="noreferrer" aria-label={`${title}. Open ranked page.`}>{rank}</a>
+        ) : <span>{rank}</span>}
+      </span>
+      {movement ? <small className={`matrix-movement ${state}`}>{movement}</small> : null}
+      {result.issues?.length ? <i className="matrix-issue" aria-label={result.issues.join(", ")}>!</i> : null}
     </div>
   );
 }

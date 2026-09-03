@@ -56,8 +56,8 @@ export function ClientReportDashboard({
           <option value="180">Last 6 months</option>
           <option value="all">All time</option>
         </FilterSelect>
-        <FilterSelect label="Report" name="project" value={filters.projectId ?? ""}>
-          <option value="">All reports</option>
+        <FilterSelect label="Project" name="project" value={filters.projectId ?? ""}>
+          <option value="">All projects</option>
           {data.options.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
         </FilterSelect>
         <FilterSelect label="Area" name="area" value={filters.locationId ?? ""}>
@@ -104,7 +104,6 @@ export function ClientReportDashboard({
           emptyMessage={`No live rankings match these filters${readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}`}
           keywordHref={(keywordId) => reportHref(basePath, filters, keywordId)}
           showChecked
-          showProject
           showVolume
         />
       </section>
