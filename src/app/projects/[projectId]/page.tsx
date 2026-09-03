@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
   createKeywords,
+  disconnectProjectGscProperty,
   queueKeywordMetrics,
+  updateProjectGscProperty,
   updateProjectSchedule,
   updateKeywordActive,
   updateLocationActive,
@@ -15,6 +17,11 @@ import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
 import { configuredKeywordMetricsCostUsd, estimateRankRunCost } from "@/lib/dataforseo-costs";
+import {
+  googleSearchConsoleConfigured,
+  listSearchConsoleSites,
+  type SearchConsoleSite
+} from "@/lib/google-search-console";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +30,17 @@ export default async function ProjectDetailPage({
   searchParams
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ sandboxError?: string; liveError?: string; metricsError?: string; metricsQueued?: string }>;
+  searchParams: Promise<{
+    sandboxError?: string;
+    liveError?: string;
+    metricsError?: string;
+    metricsQueued?: string;
+    gscError?: string;
+    gscMapped?: string;
+  }>;
 }) {
   const { projectId } = await params;
-  const { sandboxError, liveError, metricsError, metricsQueued } = await searchParams;
+  const { sandboxError, liveError, metricsError, metricsQueued, gscError, gscMapped } = await searchParams;
   const actor = await currentActor();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -40,6 +54,13 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound();
   if (actor.role !== "admin") redirect(`/clients/${project.clientId}`);
+
+  const gscConfigured = googleSearchConsoleConfigured();
+  const gscConnections = gscConfigured ? await prisma.googleSearchConsoleConnection.findMany({
+    orderBy: { accountEmail: "asc" },
+    select: { id: true, accountEmail: true, encryptedRefreshToken: true }
+  }) : [];
+  const gscProperties = await loadGscPropertyOptions(gscConnections);
 
   const updateProjectWithId = updateProject.bind(null, project.id);
   const updateScheduleWithId = updateProjectSchedule.bind(null, project.id);
@@ -57,6 +78,8 @@ export default async function ProjectDetailPage({
     pageLimit: project.schedulePageLimit
   }, "standard");
   const queueMetrics = queueKeywordMetrics.bind(null, project.id);
+  const mapGscProperty = updateProjectGscProperty.bind(null, project.id);
+  const unmapGscProperty = disconnectProjectGscProperty.bind(null, project.id);
 
   return (
     <>
@@ -75,6 +98,8 @@ export default async function ProjectDetailPage({
       {liveError ? <div className="notice danger-notice"><strong>Live check not started.</strong> {liveError}</div> : null}
       {metricsError ? <div className="notice danger-notice"><strong>Keyword metrics not queued.</strong> {metricsError}</div> : null}
       {metricsQueued ? <div className="notice"><strong>Keyword metrics queued.</strong> The worker will submit and collect them.</div> : null}
+      {gscError ? <div className="notice danger-notice"><strong>Search Console property not saved.</strong> {gscError}</div> : null}
+      {gscMapped ? <div className="notice"><strong>Search Console property mapped.</strong> This report is ready for its first data import.</div> : null}
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
@@ -107,6 +132,57 @@ export default async function ProjectDetailPage({
             <span><strong>{project.rankRuns.length}</strong> recent runs</span>
           </div>
         </div>
+      </section>
+
+      <section className="card spaced-section gsc-project-card">
+        <div className="section-heading compact-heading">
+          <div>
+            <p className="label label-with-icon"><Icon name="graph" />Google Search Console</p>
+            <h3>Property mapping</h3>
+          </div>
+          <span className={`status ${project.gscPropertyUrl ? "good" : gscConnections.length > 0 ? "warn" : "danger"}`}>
+            {project.gscPropertyUrl ? "Mapped" : gscConnections.length > 0 ? "Select property" : "Not connected"}
+          </span>
+        </div>
+
+        {project.gscPropertyUrl ? (
+          <div className="gsc-current-property">
+            <div>
+              <strong>{displayGscProperty(project.gscPropertyUrl)}</strong>
+              <small>{readableGscPermission(project.gscPermissionLevel)} · mapped {project.gscConnectedAt?.toLocaleDateString("en-GB") ?? "recently"}</small>
+            </div>
+            <form action={unmapGscProperty}>
+              <button className="button button-secondary" type="submit">Remove Mapping</button>
+            </form>
+          </div>
+        ) : null}
+
+        {!gscConfigured ? (
+          <p className="muted">Search Console environment variables are missing from the server.</p>
+        ) : gscConnections.length === 0 ? (
+          <div className="integration-empty">
+            <p className="muted">Connect a Google account before assigning this report to a property.</p>
+            <Link className="button button-secondary" href="/settings">Open Settings</Link>
+          </div>
+        ) : gscProperties.options.length === 0 ? (
+          <p className="danger-text">{gscProperties.error ?? "The connected account has no available Search Console properties."}</p>
+        ) : (
+          <form className="gsc-property-form" action={mapGscProperty}>
+            <label>
+              Search Console property
+              <select name="gscProperty" required defaultValue={gscDefaultValue(project, gscProperties.options)}>
+                <option value="" disabled>Select a property</option>
+                {gscProperties.options.map((option) => (
+                  <option key={`${option.connectionId}:${option.site.siteUrl}`} value={gscOptionValue(option)}>
+                    {displayGscProperty(option.site.siteUrl)} · {option.accountEmail}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="button" type="submit">Save Property</button>
+          </form>
+        )}
+        {gscProperties.error && gscProperties.options.length > 0 ? <p className="danger-text gsc-property-error">{gscProperties.error}</p> : null}
       </section>
 
       <form className="card form schedule-card spaced-section" action={updateScheduleWithId}>
@@ -270,6 +346,65 @@ function readableDeliveryMethod(method: string) {
   if (method === "standard") return "Standard";
   if (method === "live") return "Live";
   return method.charAt(0).toUpperCase() + method.slice(1);
+}
+
+type GscConnectionOption = {
+  id: string;
+  accountEmail: string;
+  encryptedRefreshToken: string;
+};
+
+type GscPropertyOption = {
+  connectionId: string;
+  accountEmail: string;
+  site: SearchConsoleSite;
+};
+
+async function loadGscPropertyOptions(connections: GscConnectionOption[]) {
+  const results = await Promise.all(connections.map(async (connection) => {
+    try {
+      const sites = await listSearchConsoleSites(connection.encryptedRefreshToken);
+      return {
+        options: sites.map((site) => ({ connectionId: connection.id, accountEmail: connection.accountEmail, site })),
+        error: null
+      };
+    } catch (error) {
+      return {
+        options: [] as GscPropertyOption[],
+        error: `${connection.accountEmail}: ${error instanceof Error ? error.message : "Unable to list properties."}`
+      };
+    }
+  }));
+
+  return {
+    options: results.flatMap((result) => result.options),
+    error: results.map((result) => result.error).filter(Boolean).join(" ") || null
+  };
+}
+
+function gscOptionValue(option: GscPropertyOption) {
+  return JSON.stringify({ connectionId: option.connectionId, siteUrl: option.site.siteUrl });
+}
+
+function gscDefaultValue(
+  project: { gscConnectionId: string | null; gscPropertyUrl: string | null },
+  options: GscPropertyOption[]
+) {
+  const selected = options.find((option) =>
+    option.connectionId === project.gscConnectionId && option.site.siteUrl === project.gscPropertyUrl
+  );
+  return selected ? gscOptionValue(selected) : "";
+}
+
+function displayGscProperty(siteUrl: string) {
+  return siteUrl.startsWith("sc-domain:") ? siteUrl.replace("sc-domain:", "") : siteUrl;
+}
+
+function readableGscPermission(permission: string | null) {
+  if (permission === "siteOwner") return "Owner access";
+  if (permission === "siteFullUser") return "Full access";
+  if (permission === "siteRestrictedUser") return "Restricted access";
+  return "Read access";
 }
 
 type Keyword = {

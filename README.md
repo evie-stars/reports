@@ -60,10 +60,33 @@ Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `
 
 ## Remaining Security Work
 
-Complete these infrastructure-level items before connecting GA4 or Google Search Console accounts:
+Complete these infrastructure-level items as the reporting integrations expand:
 
 7. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
-10. Complete a focused application and infrastructure security review before connecting GA4 or Google Search Console accounts.
+10. Complete a focused application and infrastructure security review before importing broader GA4 datasets.
+
+## Google Search Console
+
+The first Search Console phase connects an internal Google account and lets an administrator map one verified Search Console property to each report. It does not import performance data yet. Access tokens are generated only when needed; the long-lived refresh token is encrypted at rest with AES-256-GCM.
+
+Create a separate Google OAuth web client with this production redirect URI:
+
+```text
+https://reports.starwebsites.co.uk/api/integrations/google/callback
+```
+
+Set these server variables:
+
+```text
+GOOGLE_SEARCH_CONSOLE_CLIENT_ID
+GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET
+GOOGLE_SEARCH_CONSOLE_REDIRECT_URI
+GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY
+```
+
+Generate the encryption key once with `openssl rand -hex 32`, store it with the application secrets, and include it in database-backup recovery documentation. Changing or losing this key makes existing connected-account tokens unreadable.
+
+After deployment, open **Settings**, connect the Google account, then open a report's settings and select its Search Console property. The integration requests only `webmasters.readonly` access. Disconnecting in Report Hub removes the locally stored token and report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
 ## Local Setup
 

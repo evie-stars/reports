@@ -12,6 +12,7 @@ import { importRankHistoryCsv } from "@/lib/rank-history-import";
 import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/rank-queue";
 import { executeSandboxRankRun } from "@/lib/rank-runner";
 import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
+import { listSearchConsoleSites } from "@/lib/google-search-console";
 import {
   actionRateLimit,
   enforceRateLimit,
@@ -79,6 +80,11 @@ const scheduleSchema = z.object({
   scheduleDevices: z.array(z.enum(["desktop", "mobile"])).min(1),
   scheduleSearchTypes: z.array(z.enum(["organic", "maps"])).min(1),
   schedulePageLimit: z.coerce.number().int().min(1).max(10)
+});
+
+const gscPropertySelectionSchema = z.object({
+  connectionId: z.string().min(1),
+  siteUrl: z.string().min(1)
 });
 
 export async function createClient(formData: FormData) {
@@ -199,6 +205,88 @@ export async function updateProject(projectId: string, formData: FormData) {
 
   revalidatePath(`/clients/${data.clientId}`);
   revalidatePath(`/projects/${projectId}`);
+}
+
+export async function updateProjectGscProperty(projectId: string, formData: FormData) {
+  const actor = await guardedAdminAction("integration", actionRateLimit());
+
+  try {
+    const selection = readGscPropertySelection(formData.get("gscProperty"));
+    const connection = await prisma.googleSearchConsoleConnection.findUnique({ where: { id: selection.connectionId } });
+    if (!connection) throw new Error("That Google Search Console connection no longer exists.");
+
+    const sites = await listSearchConsoleSites(connection.encryptedRefreshToken);
+    const site = sites.find((candidate) => candidate.siteUrl === selection.siteUrl);
+    if (!site) throw new Error("That Search Console property is not available to the connected Google account.");
+
+    await prisma.$transaction([
+      prisma.project.update({
+        where: { id: projectId },
+        data: {
+          gscConnectionId: connection.id,
+          gscPropertyUrl: site.siteUrl,
+          gscPermissionLevel: site.permissionLevel,
+          gscConnectedAt: new Date()
+        }
+      }),
+      prisma.googleSearchConsoleConnection.update({
+        where: { id: connection.id },
+        data: { lastValidatedAt: new Date(), lastError: null }
+      })
+    ]);
+    await auditAction("gsc.property_mapped", actor, "project", projectId, {
+      accountEmail: connection.accountEmail,
+      siteUrl: site.siteUrl
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Search Console property could not be mapped.";
+    await auditAction("gsc.property_mapped", actor, "project", projectId, { error: message }, "failure");
+    redirect(`/projects/${projectId}?gscError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  redirect(`/projects/${projectId}?gscMapped=1`);
+}
+
+export async function disconnectProjectGscProperty(projectId: string) {
+  const actor = await guardedAdminAction("integration", actionRateLimit());
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      gscConnectionId: null,
+      gscPropertyUrl: null,
+      gscPermissionLevel: null,
+      gscConnectedAt: null
+    }
+  });
+  await auditAction("gsc.property_unmapped", actor, "project", projectId);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function disconnectGoogleSearchConsole(connectionId: string) {
+  const actor = await guardedAdminAction("integration", actionRateLimit());
+  const connection = await prisma.googleSearchConsoleConnection.findUnique({
+    where: { id: connectionId },
+    select: { accountEmail: true }
+  });
+  if (!connection) return;
+
+  await prisma.$transaction([
+    prisma.project.updateMany({
+      where: { gscConnectionId: connectionId },
+      data: {
+        gscConnectionId: null,
+        gscPropertyUrl: null,
+        gscPermissionLevel: null,
+        gscConnectedAt: null
+      }
+    }),
+    prisma.googleSearchConsoleConnection.delete({ where: { id: connectionId } })
+  ]);
+  await auditAction("gsc.disconnected", actor, "gscConnection", connectionId, {
+    accountEmail: connection.accountEmail
+  });
+  revalidatePath("/settings");
 }
 
 export async function createKeyword(formData: FormData) {
@@ -427,6 +515,15 @@ function uniqueLines(value: string) {
         .filter(Boolean)
     )
   );
+}
+
+function readGscPropertySelection(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") throw new Error("Select a Search Console property.");
+  try {
+    return gscPropertySelectionSchema.parse(JSON.parse(value));
+  } catch {
+    throw new Error("Select a valid Search Console property.");
+  }
 }
 
 async function guardedAdminAction(scope: string, policy: RateLimitPolicy) {

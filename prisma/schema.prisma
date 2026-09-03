@@ -81,35 +81,55 @@ model Client {
 }
 
 model Project {
-  id                             String               @id @default(cuid())
+  id                             String                         @id @default(cuid())
   clientId                       String
   name                           String
   domain                         String
   targetBusinessName             String?
   serviceArea                    String?
-  scheduleEnabled                Boolean              @default(false)
-  scheduleDay                    Int                  @default(1)
-  scheduleDevices                Device[]             @default([desktop])
-  scheduleSearchTypes            SearchType[]         @default([organic])
-  schedulePageLimit              Int                  @default(10)
-  keywordMetricsStatus           KeywordMetricsStatus @default(idle)
+  scheduleEnabled                Boolean                        @default(false)
+  scheduleDay                    Int                            @default(1)
+  scheduleDevices                Device[]                       @default([desktop])
+  scheduleSearchTypes            SearchType[]                   @default([organic])
+  schedulePageLimit              Int                            @default(10)
+  keywordMetricsStatus           KeywordMetricsStatus           @default(idle)
   keywordMetricsTaskId           String?
   keywordMetricsRequestedAt      DateTime?
   keywordMetricsUpdatedAt        DateTime?
   keywordMetricsNextPollAt       DateTime?
-  keywordMetricsPollAttempts     Int                  @default(0)
-  keywordMetricsEstimatedCostUsd Decimal              @default(0) @db.Decimal(10, 6)
-  keywordMetricsActualCostUsd    Decimal              @default(0) @db.Decimal(10, 6)
+  keywordMetricsPollAttempts     Int                            @default(0)
+  keywordMetricsEstimatedCostUsd Decimal                        @default(0) @db.Decimal(10, 6)
+  keywordMetricsActualCostUsd    Decimal                        @default(0) @db.Decimal(10, 6)
   keywordMetricsError            String?
-  createdAt                      DateTime             @default(now())
-  updatedAt                      DateTime             @updatedAt
-  client                         Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  gscConnectionId                String?
+  gscPropertyUrl                 String?
+  gscPermissionLevel             String?
+  gscConnectedAt                 DateTime?
+  createdAt                      DateTime                       @default(now())
+  updatedAt                      DateTime                       @updatedAt
+  client                         Client                         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  gscConnection                  GoogleSearchConsoleConnection? @relation(fields: [gscConnectionId], references: [id], onDelete: SetNull)
   keywords                       Keyword[]
   locations                      Location[]
   competitors                    Competitor[]
   rankRuns                       RankRun[]
 
   @@index([clientId])
+  @@index([gscConnectionId])
+}
+
+model GoogleSearchConsoleConnection {
+  id                    String    @id @default(cuid())
+  accountEmail          String    @unique
+  encryptedRefreshToken String
+  grantedScopes         String[]
+  connectedByEmail      String
+  connectedAt           DateTime  @default(now())
+  lastValidatedAt       DateTime?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  projects              Project[]
 }
 
 model Keyword {
@@ -243,16 +263,16 @@ model SystemLock {
 }
 
 model AuditLog {
-  id           String   @id @default(cuid())
-  event        String
-  outcome      String   @default("success")
-  actorEmail   String?
-  actorRole    String?
-  entityType   String?
-  entityId     String?
-  ipAddress    String?
-  metadata     Json?
-  createdAt    DateTime @default(now())
+  id         String   @id @default(cuid())
+  event      String
+  outcome    String   @default("success")
+  actorEmail String?
+  actorRole  String?
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
 
   @@index([createdAt])
   @@index([event, createdAt])
@@ -271,44 +291,44 @@ model RateLimitBucket {
 }
 
 model WorkerHeartbeat {
-  key              String   @id
-  status           String   @default("never")
+  key              String    @id
+  status           String    @default("never")
   startedAt        DateTime?
   completedAt      DateTime?
   lastSuccessAt    DateTime?
   lastFailureAt    DateTime?
-  scheduled        Int      @default(0)
-  submitted        Int      @default(0)
-  collected        Int      @default(0)
-  metricsSubmitted Int      @default(0)
-  metricsCollected Int      @default(0)
-  message           String?
-  updatedAt         DateTime @updatedAt
+  scheduled        Int       @default(0)
+  submitted        Int       @default(0)
+  collected        Int       @default(0)
+  metricsSubmitted Int       @default(0)
+  metricsCollected Int       @default(0)
+  message          String?
+  updatedAt        DateTime  @updatedAt
 }
 
 model RankResult {
-  id              String         @id @default(cuid())
-  runId           String
-  keywordId       String
-  locationId      String
-  searchType      SearchType
-  device          Device
-  rankGroup       Int?
-  rankAbsolute    Int?
-  matched         Boolean        @default(false)
-  matchedName     String?
-  matchedUrl      String?
-  resultTitle     String?
-  resultUrl       String?
-  resultDomain    String?
-  direction       RankDirection?
-  previousRank    Int?
-  checkedAt       DateTime       @default(now())
-  rawItem         Json?
-  run             RankRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
-  keyword         Keyword        @relation(fields: [keywordId], references: [id], onDelete: Cascade)
-  location        Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  serpFeatures    SerpFeature[]
+  id           String         @id @default(cuid())
+  runId        String
+  keywordId    String
+  locationId   String
+  searchType   SearchType
+  device       Device
+  rankGroup    Int?
+  rankAbsolute Int?
+  matched      Boolean        @default(false)
+  matchedName  String?
+  matchedUrl   String?
+  resultTitle  String?
+  resultUrl    String?
+  resultDomain String?
+  direction    RankDirection?
+  previousRank Int?
+  checkedAt    DateTime       @default(now())
+  rawItem      Json?
+  run          RankRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  keyword      Keyword        @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  location     Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  serpFeatures SerpFeature[]
 
   @@index([keywordId, locationId, searchType, device, checkedAt])
   @@index([runId])
@@ -347,33 +367,33 @@ model ApiRequest {
 }
 
 model GscSnapshot {
-  id         String   @id @default(cuid())
-  projectId String
-  date       DateTime
-  query      String?
-  page       String?
+  id          String   @id @default(cuid())
+  projectId   String
+  date        DateTime
+  query       String?
+  page        String?
   clicks      Int      @default(0)
   impressions Int      @default(0)
-  ctr        Float?
-  position   Float?
-  rawData    Json?
-  createdAt  DateTime @default(now())
+  ctr         Float?
+  position    Float?
+  rawData     Json?
+  createdAt   DateTime @default(now())
 
   @@index([projectId, date])
 }
 
 model Ga4Snapshot {
-  id         String   @id @default(cuid())
-  projectId String
-  date       DateTime
-  source     String?
-  medium     String?
+  id          String   @id @default(cuid())
+  projectId   String
+  date        DateTime
+  source      String?
+  medium      String?
   landingPage String?
-  sessions   Int      @default(0)
-  users      Int      @default(0)
-  conversions Float   @default(0)
-  rawData    Json?
-  createdAt  DateTime @default(now())
+  sessions    Int      @default(0)
+  users       Int      @default(0)
+  conversions Float    @default(0)
+  rawData     Json?
+  createdAt   DateTime @default(now())
 
   @@index([projectId, date])
 }

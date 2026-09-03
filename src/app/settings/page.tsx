@@ -1,13 +1,19 @@
 import { Icon } from "@/components/icon";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { disconnectGoogleSearchConsole } from "@/app/actions";
 import { currentActor } from "@/lib/access";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { workerHealth } from "@/lib/worker-health";
+import { googleSearchConsoleConfigured } from "@/lib/google-search-console";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: {
+  searchParams: Promise<{ gsc?: string; gscError?: string }>;
+}) {
+  const { gsc, gscError } = await searchParams;
   const actor = await currentActor();
   if (actor.role !== "admin") redirect("/");
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
@@ -18,12 +24,17 @@ export default async function SettingsPage() {
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
   const allowedAccessConfigured = Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
+  const gscConfigured = googleSearchConsoleConfigured();
   const budget = await getDataForSeoBudgetSummary();
   const weekAgo = sevenDaysAgo();
-  const [heartbeat, failedRuns, auditLogs] = await Promise.all([
+  const [heartbeat, failedRuns, auditLogs, gscConnections] = await Promise.all([
     prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
     prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
-    prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 })
+    prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
+    prisma.googleSearchConsoleConnection.findMany({
+      orderBy: { connectedAt: "desc" },
+      include: { _count: { select: { projects: true } } }
+    })
   ]);
   const worker = workerHealth(heartbeat);
 
@@ -35,6 +46,9 @@ export default async function SettingsPage() {
           <p>Integration status and safety limits for the first build phase.</p>
         </div>
       </header>
+
+      {gsc === "connected" ? <div className="notice"><strong>Search Console connected.</strong> You can now assign properties from each report’s settings.</div> : null}
+      {gscError ? <div className="notice danger-notice"><strong>Search Console was not connected.</strong> {gscError}</div> : null}
 
       <section className="grid two">
         <div className="card">
@@ -75,6 +89,44 @@ export default async function SettingsPage() {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div className="card integration-card">
+          <div className="section-heading compact-heading">
+            <div>
+              <p className="label label-with-icon"><Icon name="graph" />Google Search Console</p>
+              <h3>Organic performance data</h3>
+            </div>
+            <span className={`status ${gscConnections.length > 0 ? "good" : gscConfigured ? "warn" : "danger"}`}>
+              {gscConnections.length > 0 ? "Connected" : gscConfigured ? "Ready" : "Setup required"}
+            </span>
+          </div>
+          {!gscConfigured ? (
+            <p className="muted">Add the four Google Search Console environment variables before connecting an account.</p>
+          ) : gscConnections.length === 0 ? (
+            <div className="integration-empty">
+              <p className="muted">Connect the internal Google account that has access to your client properties.</p>
+              <Link className="button" href="/api/integrations/google/start">Connect Google Account</Link>
+            </div>
+          ) : (
+            <div className="integration-connections">
+              {gscConnections.map((connection) => {
+                const disconnect = disconnectGoogleSearchConsole.bind(null, connection.id);
+                return (
+                  <div className="integration-connection" key={connection.id}>
+                    <div>
+                      <strong>{connection.accountEmail}</strong>
+                      <small>{connection._count.projects} mapped report{connection._count.projects === 1 ? "" : "s"} · connected {connection.connectedAt.toLocaleDateString("en-GB")}</small>
+                    </div>
+                    <form action={disconnect}>
+                      <button className="button button-secondary" type="submit">Disconnect</button>
+                    </form>
+                  </div>
+                );
+              })}
+              <Link className="button button-secondary integration-add" href="/api/integrations/google/start">Connect Another Account</Link>
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -139,9 +191,9 @@ export default async function SettingsPage() {
 
         <div className="card">
           <p className="label label-with-icon"><Icon name="graph" />Next Integrations</p>
-          <h3>GA4 and GSC placeholders</h3>
+          <h3>Google Analytics 4</h3>
           <p className="muted">
-            The database includes snapshot tables for Google Analytics and Google Search Console. We can add OAuth/import jobs after rank tracking is stable.
+            The database includes a GA4 snapshot table. We can add its connection and import flow after Search Console reporting is established.
           </p>
         </div>
       </section>

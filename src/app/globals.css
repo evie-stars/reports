@@ -1237,6 +1237,108 @@ button.status:hover {
   font-size: 26px;
 }
 
+.integration-card,
+.gsc-project-card {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+}
+
+.integration-card h3,
+.gsc-project-card h3 {
+  margin-bottom: 0;
+}
+
+.integration-empty,
+.integration-connection,
+.gsc-current-property {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.integration-empty p {
+  margin: 0;
+}
+
+.integration-connections {
+  display: grid;
+  gap: 10px;
+}
+
+.integration-connection,
+.gsc-current-property {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.integration-connection strong,
+.gsc-current-property strong,
+.integration-connection small,
+.gsc-current-property small {
+  display: block;
+}
+
+.integration-connection strong,
+.gsc-current-property strong {
+  font-size: 13px;
+}
+
+.integration-connection small,
+.gsc-current-property small {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.integration-add {
+  justify-self: start;
+}
+
+.gsc-property-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.gsc-property-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 5px;
+}
+
+.gsc-property-form select {
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 15px) 17px / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 10px) 17px / 5px 5px no-repeat,
+    #fbfcfd;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  min-height: 40px;
+  padding: 8px 28px 8px 10px;
+  width: 100%;
+}
+
+.gsc-property-form select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(34, 101, 179, 0.13);
+  outline: none;
+}
+
+.gsc-property-error {
+  font-size: 11px;
+  margin: 0;
+}
+
 .check-list {
   display: grid;
   gap: 10px;
@@ -2710,7 +2812,16 @@ button.status:hover {
   }
 
   .share-renew-form,
-  .operations-alert {
+  .operations-alert,
+  .gsc-property-form {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .integration-empty,
+  .integration-connection,
+  .gsc-current-property {
     align-items: stretch;
     display: grid;
   }
