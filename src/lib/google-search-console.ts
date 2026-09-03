@@ -69,6 +69,13 @@ export function buildGoogleSearchConsoleAuthorizationUrl(
   return url;
 }
 
+export function googleSearchConsoleAppUrl(pathname: string) {
+  const publicUrl = process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI || process.env.AUTH_URL;
+  if (!publicUrl) throw new Error("The public application URL is not configured.");
+  const publicOrigin = new URL(publicUrl).origin;
+  return new URL(pathname, `${publicOrigin}/`);
+}
+
 export async function exchangeGoogleSearchConsoleCode(code: string) {
   const config = googleSearchConsoleOauthConfig();
   const response = await fetch(GOOGLE_TOKEN_URL, {

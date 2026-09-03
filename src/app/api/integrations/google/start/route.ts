@@ -4,6 +4,7 @@ import { currentActor } from "@/lib/access";
 import { writeRequestAudit } from "@/lib/audit";
 import {
   buildGoogleSearchConsoleAuthorizationUrl,
+  googleSearchConsoleAppUrl,
   googleSearchConsoleConfigured,
   GSC_OAUTH_STATE_COOKIE
 } from "@/lib/google-search-console";
@@ -37,6 +38,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     const message = error instanceof RateLimitError ? error.message : error instanceof Error ? error.message : "Unable to start Google connection.";
-    return NextResponse.redirect(new URL(`/settings?gscError=${encodeURIComponent(message)}`, request.url));
+    return NextResponse.redirect(googleSearchConsoleAppUrl(`/settings?gscError=${encodeURIComponent(message)}`));
   }
 }

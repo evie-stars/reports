@@ -7,6 +7,7 @@ import { encryptGscToken } from "@/lib/gsc-crypto";
 import {
   exchangeGoogleSearchConsoleCode,
   googleAccountForAccessToken,
+  googleSearchConsoleAppUrl,
   GSC_OAUTH_STATE_COOKIE,
   GSC_READONLY_SCOPE
 } from "@/lib/google-search-console";
@@ -79,7 +80,7 @@ function statesMatch(left: string, right: string) {
 }
 
 function settingsRedirect(request: NextRequest, state: string | null, error?: string) {
-  const url = new URL("/settings", request.url);
+  const url = googleSearchConsoleAppUrl("/settings");
   if (state) url.searchParams.set("gsc", state);
   if (error) url.searchParams.set("gscError", error);
   const response = NextResponse.redirect(url);
