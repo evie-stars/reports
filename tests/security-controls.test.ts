@@ -4,6 +4,7 @@ import {
   actionRateLimit,
   apiRateLimit,
   configuredPositiveInteger,
+  gscImportRateLimit,
   paidRunRateLimit,
   shareRateLimit
 } from "../src/lib/rate-limit";
@@ -13,6 +14,7 @@ test("uses conservative default rate-limit policies", () => {
   assert.deepEqual(actionRateLimit(), { limit: 30, windowSeconds: 60 });
   assert.deepEqual(paidRunRateLimit(), { limit: 10, windowSeconds: 3600 });
   assert.deepEqual(shareRateLimit(), { limit: 10, windowSeconds: 3600 });
+  assert.deepEqual(gscImportRateLimit(), { limit: 6, windowSeconds: 3600 });
   assert.deepEqual(apiRateLimit(), { limit: 60, windowSeconds: 60 });
 });
 

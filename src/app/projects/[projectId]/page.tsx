@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import {
   createKeywords,
   disconnectProjectGscProperty,
+  importProjectGscData,
   queueKeywordMetrics,
   updateProjectGscProperty,
   updateProjectSchedule,
@@ -13,6 +14,7 @@ import {
 import { AreaPickerForm } from "@/components/area-picker-form";
 import { Icon } from "@/components/icon";
 import { LiveRunForm } from "@/components/live-run-form";
+import { GscImportButton } from "@/components/gsc-import-button";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
@@ -37,10 +39,21 @@ export default async function ProjectDetailPage({
     metricsQueued?: string;
     gscError?: string;
     gscMapped?: string;
+    gscImported?: string;
+    gscImportError?: string;
   }>;
 }) {
   const { projectId } = await params;
-  const { sandboxError, liveError, metricsError, metricsQueued, gscError, gscMapped } = await searchParams;
+  const {
+    sandboxError,
+    liveError,
+    metricsError,
+    metricsQueued,
+    gscError,
+    gscMapped,
+    gscImported,
+    gscImportError
+  } = await searchParams;
   const actor = await currentActor();
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -80,6 +93,7 @@ export default async function ProjectDetailPage({
   const queueMetrics = queueKeywordMetrics.bind(null, project.id);
   const mapGscProperty = updateProjectGscProperty.bind(null, project.id);
   const unmapGscProperty = disconnectProjectGscProperty.bind(null, project.id);
+  const importGscData = importProjectGscData.bind(null, project.id);
 
   return (
     <>
@@ -100,6 +114,8 @@ export default async function ProjectDetailPage({
       {metricsQueued ? <div className="notice"><strong>Keyword metrics queued.</strong> The worker will submit and collect them.</div> : null}
       {gscError ? <div className="notice danger-notice"><strong>Search Console property not saved.</strong> {gscError}</div> : null}
       {gscMapped ? <div className="notice"><strong>Search Console property mapped.</strong> This report is ready for its first data import.</div> : null}
+      {gscImported !== undefined ? <div className="notice"><strong>Search Console data imported.</strong> {gscImported} daily snapshot{gscImported === "1" ? "" : "s"} stored.</div> : null}
+      {gscImportError ? <div className="notice danger-notice"><strong>Search Console import failed.</strong> {gscImportError}</div> : null}
 
       <section className="grid two">
         <form className="card form" action={updateProjectWithId}>
@@ -146,15 +162,27 @@ export default async function ProjectDetailPage({
         </div>
 
         {project.gscPropertyUrl ? (
-          <div className="gsc-current-property">
-            <div>
-              <strong>{displayGscProperty(project.gscPropertyUrl)}</strong>
-              <small>{readableGscPermission(project.gscPermissionLevel)} · mapped {project.gscConnectedAt?.toLocaleDateString("en-GB") ?? "recently"}</small>
+          <>
+            <div className="gsc-current-property">
+              <div>
+                <strong>{displayGscProperty(project.gscPropertyUrl)}</strong>
+                <small>{readableGscPermission(project.gscPermissionLevel)} · mapped {project.gscConnectedAt?.toLocaleDateString("en-GB") ?? "recently"}</small>
+              </div>
+              <form action={unmapGscProperty}>
+                <button className="button button-secondary" type="submit">Remove Mapping</button>
+              </form>
             </div>
-            <form action={unmapGscProperty}>
-              <button className="button button-secondary" type="submit">Remove Mapping</button>
-            </form>
-          </div>
+            <div className="gsc-import-control">
+              <div>
+                <span className={`status ${gscImportStatusTone(project.gscImportStatus)}`}>{readableGscImportStatus(project.gscImportStatus)}</span>
+                <p>{gscImportSummary(project)}</p>
+                {project.gscImportError ? <small className="danger-text">{project.gscImportError}</small> : null}
+              </div>
+              <form action={importGscData}>
+                <GscImportButton hasData={Boolean(project.gscLastImportedAt)} />
+              </form>
+            </div>
+          </>
         ) : null}
 
         {!gscConfigured ? (
@@ -405,6 +433,32 @@ function readableGscPermission(permission: string | null) {
   if (permission === "siteFullUser") return "Full access";
   if (permission === "siteRestrictedUser") return "Restricted access";
   return "Read access";
+}
+
+function readableGscImportStatus(status: string) {
+  if (status === "completed") return "Imported";
+  if (status === "running") return "Importing";
+  if (status === "failed") return "Failed";
+  return "Ready";
+}
+
+function gscImportStatusTone(status: string) {
+  if (status === "completed") return "good";
+  if (status === "failed") return "danger";
+  return "warn";
+}
+
+function gscImportSummary(project: {
+  gscLastImportedAt: Date | null;
+  gscImportStartDate: Date | null;
+  gscImportEndDate: Date | null;
+  gscImportedRows: number;
+}) {
+  if (!project.gscLastImportedAt) return "Import the previous 90 days of final Google web-search data.";
+  const range = project.gscImportStartDate && project.gscImportEndDate
+    ? `${project.gscImportStartDate.toLocaleDateString("en-GB")} to ${project.gscImportEndDate.toLocaleDateString("en-GB")}`
+    : "latest 90-day period";
+  return `${project.gscImportedRows} daily snapshots · ${range} · refreshed ${project.gscLastImportedAt.toLocaleString("en-GB")}`;
 }
 
 type Keyword = {

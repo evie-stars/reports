@@ -57,21 +57,36 @@ export async function getClientReportData(clientId: string, searchParams: Report
     ...(filters.device ? { device: filters.device } : {}),
     searchType: filters.searchType ? filters.searchType : { in: [SearchType.organic, SearchType.maps] }
   };
+  const gscCutoff = gscDateCutoff(filters.period);
 
-  const descendingResults = await prisma.rankResult.findMany({
-    where,
-    orderBy: { checkedAt: "desc" },
-    take: 10000,
-    include: {
-      keyword: true,
-      location: true,
-      serpFeatures: {
-        where: { type: "target_match" },
-        select: { type: true }
+  const [descendingResults, gscSnapshots] = await Promise.all([
+    prisma.rankResult.findMany({
+      where,
+      orderBy: { checkedAt: "desc" },
+      take: 10000,
+      include: {
+        keyword: true,
+        location: true,
+        serpFeatures: {
+          where: { type: "target_match" },
+          select: { type: true }
+        },
+        run: { include: { project: true } }
+      }
+    }),
+    prisma.gscSnapshot.findMany({
+      where: {
+        dimension: "daily_total",
+        project: {
+          clientId,
+          gscPropertyUrl: { not: null },
+          ...(filters.projectId ? { id: filters.projectId } : {})
+        },
+        ...(gscCutoff ? { date: { gte: gscCutoff } } : {})
       },
-      run: { include: { project: true } }
-    }
-  });
+      orderBy: { date: "asc" }
+    })
+  ]);
 
   const histories = new Map<string, typeof descendingResults>();
   for (const result of descendingResults) {
@@ -122,6 +137,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
       (total, project) => total + project.keywords.filter((keyword) => !filters.group || keyword.group === filters.group).length,
       0
     );
+  const selectedProjects = client.projects.filter((project) => !filters.projectId || project.id === filters.projectId);
 
   return {
     client,
@@ -130,6 +146,11 @@ export async function getClientReportData(clientId: string, searchParams: Report
     keywordHistory,
     selectedKeyword,
     trend: buildTrend(descendingResults, filters.period),
+    gsc: buildGscReport(
+      gscSnapshots,
+      selectedProjects.some((project) => Boolean(project.gscPropertyUrl)),
+      latestDate(selectedProjects.map((project) => project.gscLastImportedAt))
+    ),
     stats: buildStats(latestResults, activeKeywordCount),
     options: {
       projects: client.projects.map((project) => ({ id: project.id, name: project.name })),
@@ -319,6 +340,65 @@ export function countPositionBuckets(ranks: Array<number | null>) {
     elevenToTwenty: ranks.filter((rank) => rank !== null && rank >= 11 && rank <= 20).length,
     beyondTwenty: ranks.filter((rank) => rank === null || rank > 20).length
   };
+}
+
+export function buildGscReport(
+  snapshots: Array<{ date: Date; clicks: number; impressions: number; position: number | null }>,
+  mapped: boolean,
+  lastImportedAt: Date | null
+) {
+  const dates = new Map<string, { date: Date; clicks: number; impressions: number; weightedPosition: number }>();
+  for (const snapshot of snapshots) {
+    const key = isoDay(snapshot.date);
+    const current = dates.get(key) ?? { date: snapshot.date, clicks: 0, impressions: 0, weightedPosition: 0 };
+    current.clicks += snapshot.clicks;
+    current.impressions += snapshot.impressions;
+    current.weightedPosition += (snapshot.position ?? 0) * snapshot.impressions;
+    dates.set(key, current);
+  }
+
+  const trend = Array.from(dates.values()).map((entry) => ({
+    date: isoDay(entry.date),
+    label: entry.date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
+    clicks: entry.clicks,
+    impressions: entry.impressions,
+    ctr: entry.impressions > 0 ? entry.clicks / entry.impressions : 0,
+    position: entry.impressions > 0 ? entry.weightedPosition / entry.impressions : null
+  }));
+  const clicks = trend.reduce((total, point) => total + point.clicks, 0);
+  const impressions = trend.reduce((total, point) => total + point.impressions, 0);
+  const weightedPosition = trend.reduce(
+    (total, point) => total + (point.position ?? 0) * point.impressions,
+    0
+  );
+
+  return {
+    mapped,
+    lastImportedAt,
+    latestDataDate: trend.at(-1)?.date ?? null,
+    stats: {
+      clicks,
+      impressions,
+      ctr: impressions > 0 ? clicks / impressions : null,
+      position: impressions > 0 ? weightedPosition / impressions : null
+    },
+    trend
+  };
+}
+
+function gscDateCutoff(period: ReportFilters["period"]) {
+  if (period === "all") return null;
+  const cutoff = new Date();
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (Number(period) - 1));
+  return cutoff;
+}
+
+function latestDate(values: Array<Date | null>) {
+  return values.reduce<Date | null>((latest, value) => {
+    if (!value) return latest;
+    return !latest || value > latest ? value : latest;
+  }, null);
 }
 
 function resultKey(result: Pick<ResultShape, "keywordId" | "locationId" | "searchType" | "device" | "run">) {

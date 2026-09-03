@@ -9,6 +9,7 @@ import { writeRequestAudit } from "@/lib/audit";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { importRankHistoryCsv } from "@/lib/rank-history-import";
+import { importProjectSearchConsoleData } from "@/lib/gsc-import";
 import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/rank-queue";
 import { executeSandboxRankRun } from "@/lib/rank-runner";
 import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
@@ -16,6 +17,7 @@ import { listSearchConsoleSites } from "@/lib/google-search-console";
 import {
   actionRateLimit,
   enforceRateLimit,
+  gscImportRateLimit,
   paidRunRateLimit,
   shareRateLimit,
   type RateLimitPolicy
@@ -212,28 +214,46 @@ export async function updateProjectGscProperty(projectId: string, formData: Form
 
   try {
     const selection = readGscPropertySelection(formData.get("gscProperty"));
-    const connection = await prisma.googleSearchConsoleConnection.findUnique({ where: { id: selection.connectionId } });
+    const [connection, currentProject] = await Promise.all([
+      prisma.googleSearchConsoleConnection.findUnique({ where: { id: selection.connectionId } }),
+      prisma.project.findUnique({
+        where: { id: projectId },
+        select: { gscConnectionId: true, gscPropertyUrl: true }
+      })
+    ]);
     if (!connection) throw new Error("That Google Search Console connection no longer exists.");
+    if (!currentProject) throw new Error("Report not found.");
 
     const sites = await listSearchConsoleSites(connection.encryptedRefreshToken);
     const site = sites.find((candidate) => candidate.siteUrl === selection.siteUrl);
     if (!site) throw new Error("That Search Console property is not available to the connected Google account.");
 
-    await prisma.$transaction([
-      prisma.project.update({
+    const propertyChanged = currentProject.gscConnectionId !== connection.id || currentProject.gscPropertyUrl !== site.siteUrl;
+    await prisma.$transaction(async (tx) => {
+      if (propertyChanged) await tx.gscSnapshot.deleteMany({ where: { projectId } });
+      await tx.project.update({
         where: { id: projectId },
         data: {
           gscConnectionId: connection.id,
           gscPropertyUrl: site.siteUrl,
           gscPermissionLevel: site.permissionLevel,
-          gscConnectedAt: new Date()
+          gscConnectedAt: new Date(),
+          ...(propertyChanged ? {
+            gscImportStatus: "idle",
+            gscImportStartedAt: null,
+            gscLastImportedAt: null,
+            gscImportStartDate: null,
+            gscImportEndDate: null,
+            gscImportedRows: 0,
+            gscImportError: null
+          } : {})
         }
-      }),
-      prisma.googleSearchConsoleConnection.update({
+      });
+      await tx.googleSearchConsoleConnection.update({
         where: { id: connection.id },
         data: { lastValidatedAt: new Date(), lastError: null }
-      })
-    ]);
+      });
+    });
     await auditAction("gsc.property_mapped", actor, "project", projectId, {
       accountEmail: connection.accountEmail,
       siteUrl: site.siteUrl
@@ -256,7 +276,9 @@ export async function disconnectProjectGscProperty(projectId: string) {
       gscConnectionId: null,
       gscPropertyUrl: null,
       gscPermissionLevel: null,
-      gscConnectedAt: null
+      gscConnectedAt: null,
+      gscImportStatus: "idle",
+      gscImportError: null
     }
   });
   await auditAction("gsc.property_unmapped", actor, "project", projectId);
@@ -278,7 +300,9 @@ export async function disconnectGoogleSearchConsole(connectionId: string) {
         gscConnectionId: null,
         gscPropertyUrl: null,
         gscPermissionLevel: null,
-        gscConnectedAt: null
+        gscConnectedAt: null,
+        gscImportStatus: "idle",
+        gscImportError: null
       }
     }),
     prisma.googleSearchConsoleConnection.delete({ where: { id: connectionId } })
@@ -287,6 +311,29 @@ export async function disconnectGoogleSearchConsole(connectionId: string) {
     accountEmail: connection.accountEmail
   });
   revalidatePath("/settings");
+}
+
+export async function importProjectGscData(projectId: string) {
+  const actor = await guardedAdminAction("gsc-import", gscImportRateLimit());
+  let imported: Awaited<ReturnType<typeof importProjectSearchConsoleData>>;
+
+  try {
+    imported = await importProjectSearchConsoleData(projectId);
+    await auditAction("gsc.data_imported", actor, "project", projectId, {
+      rowCount: imported.rowCount,
+      startDate: imported.startDate,
+      endDate: imported.endDate
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Search Console data could not be imported.";
+    await auditAction("gsc.data_imported", actor, "project", projectId, { error: message }, "failure");
+    revalidatePath(`/projects/${projectId}`);
+    redirect(`/projects/${projectId}?gscImportError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/clients/${imported.clientId}`);
+  redirect(`/projects/${projectId}?gscImported=${imported.rowCount}`);
 }
 
 export async function createKeyword(formData: FormData) {

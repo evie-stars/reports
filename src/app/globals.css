@@ -1339,6 +1339,27 @@ button.status:hover {
   margin: 0;
 }
 
+.gsc-import-control {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
+.gsc-import-control p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+
+.gsc-import-control small {
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+}
+
 .check-list {
   display: grid;
   gap: 10px;
@@ -1619,6 +1640,120 @@ button.status:hover {
 
 .trend-card {
   padding-bottom: 14px;
+}
+
+.gsc-performance-card {
+  padding-bottom: 12px;
+}
+
+.gsc-data-date {
+  font-size: 11px;
+}
+
+.gsc-metric-strip {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 2px 0 12px;
+}
+
+.gsc-metric-strip > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+}
+
+.gsc-metric-strip > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.gsc-metric-strip span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.gsc-metric-strip strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.gsc-chart-wrap {
+  min-height: 220px;
+  overflow: hidden;
+}
+
+.gsc-chart {
+  display: block;
+  height: auto;
+  overflow: visible;
+  width: 100%;
+}
+
+.gsc-chart-legend {
+  display: flex;
+  font-size: 10px;
+  font-weight: 500;
+  gap: 16px;
+  justify-content: flex-end;
+  margin: 0 4px -2px;
+}
+
+.gsc-chart-legend span::before {
+  border-radius: 2px;
+  content: "";
+  display: inline-block;
+  height: 8px;
+  margin-right: 6px;
+  width: 8px;
+}
+
+.gsc-chart-legend .clicks::before {
+  background: var(--green);
+}
+
+.gsc-chart-legend .impressions::before {
+  background: var(--light-blue);
+  opacity: 0.45;
+}
+
+.gsc-impression-bar {
+  fill: var(--light-blue);
+  opacity: 0.26;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: position-bar-in 480ms var(--ease-out) both;
+  transition: opacity 150ms ease;
+}
+
+.gsc-impression-bar:hover {
+  opacity: 0.5;
+}
+
+.gsc-click-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-dasharray: 1800;
+  stroke-dashoffset: 1800;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.6;
+  animation: chart-line-draw 1.15s 180ms var(--ease-out) forwards;
+}
+
+.gsc-click-point {
+  fill: var(--surface);
+  stroke: var(--green);
+  stroke-width: 2;
+  transition: r 150ms ease, stroke-width 150ms ease;
+}
+
+.gsc-click-point:hover {
+  r: 4px;
+  stroke-width: 3;
 }
 
 .report-section-heading {
@@ -2821,9 +2956,22 @@ button.status:hover {
 
   .integration-empty,
   .integration-connection,
-  .gsc-current-property {
+  .gsc-current-property,
+  .gsc-import-control {
     align-items: stretch;
     display: grid;
+  }
+
+  .gsc-metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gsc-metric-strip > div:nth-child(3) {
+    border-left: 0;
+  }
+
+  .gsc-metric-strip > div:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
   }
 
   .operations-alert a {

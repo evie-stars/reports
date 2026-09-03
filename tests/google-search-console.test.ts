@@ -3,9 +3,12 @@ import test from "node:test";
 import {
   buildGoogleSearchConsoleAuthorizationUrl,
   googleSearchConsoleAppUrl,
-  GSC_READONLY_SCOPE
+  GSC_READONLY_SCOPE,
+  readSearchConsoleDailyRows,
+  searchConsoleDateRange
 } from "../src/lib/google-search-console";
 import { decryptGscToken, encryptGscToken } from "../src/lib/gsc-crypto";
+import { buildGscReport } from "../src/lib/client-report";
 
 const encryptionKey = "a".repeat(64);
 
@@ -62,6 +65,60 @@ test("builds post-OAuth redirects from the configured public callback origin", (
     restoreEnvironmentVariable("GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET", previousClientSecret);
     restoreEnvironmentVariable("GOOGLE_SEARCH_CONSOLE_REDIRECT_URI", previousRedirectUri);
   }
+});
+
+test("builds an inclusive 90-day Search Console range ending yesterday", () => {
+  assert.deepEqual(searchConsoleDateRange(90, new Date("2026-09-03T15:00:00.000Z")), {
+    startDate: "2026-06-05",
+    endDate: "2026-09-02"
+  });
+});
+
+test("validates daily Search Console rows", () => {
+  const rows = readSearchConsoleDailyRows({
+    rows: [{ keys: ["2026-09-01"], clicks: 12, impressions: 300, ctr: 0.04, position: 7.5 }]
+  });
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    {
+      date: rows[0].date,
+      clicks: rows[0].clicks,
+      impressions: rows[0].impressions,
+      ctr: rows[0].ctr,
+      position: rows[0].position
+    },
+    { date: "2026-09-01", clicks: 12, impressions: 300, ctr: 0.04, position: 7.5 }
+  );
+  assert.throws(
+    () => readSearchConsoleDailyRows({
+      rows: [{ keys: ["2026-09-31"], clicks: 1, impressions: 1, ctr: 1, position: 1 }]
+    }),
+    /invalid Search Console date/
+  );
+  assert.throws(
+    () => readSearchConsoleDailyRows({
+      rows: [{ keys: ["2026-09-01"], clicks: -1, impressions: 1, ctr: 1, position: 1 }]
+    }),
+    /invalid Search Console clicks value/
+  );
+});
+
+test("combines mapped report totals using impression-weighted position", () => {
+  const report = buildGscReport(
+    [
+      { date: new Date("2026-09-01T00:00:00.000Z"), clicks: 10, impressions: 100, position: 5 },
+      { date: new Date("2026-09-01T00:00:00.000Z"), clicks: 20, impressions: 300, position: 10 }
+    ],
+    true,
+    new Date("2026-09-02T12:00:00.000Z")
+  );
+
+  assert.equal(report.stats.clicks, 30);
+  assert.equal(report.stats.impressions, 400);
+  assert.equal(report.stats.ctr, 0.075);
+  assert.equal(report.stats.position, 8.75);
+  assert.equal(report.trend.length, 1);
 });
 
 function restoreEnvironmentVariable(name: string, value: string | undefined) {

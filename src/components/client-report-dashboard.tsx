@@ -47,6 +47,10 @@ export function ClientReportDashboard({
         <PositionDistributionChart points={data.trend} />
       </section>
 
+      {data.gsc.mapped && (!readOnly || data.gsc.trend.length > 0) ? (
+        <SearchConsolePerformance data={data.gsc} />
+      ) : null}
+
       <form className="report-filters spaced-section" action={basePath} method="get">
         <input type="hidden" name="sort" value={filters.sort} />
         <input type="hidden" name="dir" value={filters.sortDirection} />
@@ -250,6 +254,101 @@ function PositionDistributionChart({ points }: { points: ClientReportData["trend
             </g>
           );
         })}
+      </svg>
+    </div>
+  );
+}
+
+function SearchConsolePerformance({ data }: { data: ClientReportData["gsc"] }) {
+  return (
+    <section className="card gsc-performance-card spaced-section">
+      <div className="section-heading report-section-heading">
+        <div>
+          <p className="label label-with-icon"><Icon name="graph" />Search Console</p>
+          <h3>Google organic performance</h3>
+        </div>
+        <span className="muted gsc-data-date">
+          {data.latestDataDate
+            ? `Data through ${new Date(`${data.latestDataDate}T12:00:00Z`).toLocaleDateString("en-GB")}`
+            : "No imported data yet"}
+        </span>
+      </div>
+      <div className="gsc-metric-strip" aria-label="Search Console summary">
+        <GscMetric label="Clicks" value={data.stats.clicks.toLocaleString("en-GB")} />
+        <GscMetric label="Impressions" value={data.stats.impressions.toLocaleString("en-GB")} />
+        <GscMetric label="Average CTR" value={data.stats.ctr === null ? "-" : `${(data.stats.ctr * 100).toFixed(1)}%`} />
+        <GscMetric label="Average Position" value={data.stats.position === null ? "-" : data.stats.position.toFixed(1)} />
+      </div>
+      <SearchConsoleChart points={data.trend} />
+    </section>
+  );
+}
+
+function GscMetric({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function SearchConsoleChart({ points }: { points: ClientReportData["gsc"]["trend"] }) {
+  if (points.length < 2) {
+    return <div className="chart-empty compact">Import Search Console data to see clicks and impressions over time.</div>;
+  }
+
+  const width = 900;
+  const height = 250;
+  const padding = { top: 18, right: 42, bottom: 36, left: 48 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxImpressions = Math.max(1, ...points.map((point) => point.impressions));
+  const maxClicks = Math.max(1, ...points.map((point) => point.clicks));
+  const slotWidth = plotWidth / points.length;
+  const barWidth = Math.max(2, Math.min(12, slotWidth * 0.62));
+  const x = (index: number) => padding.left + slotWidth * index + slotWidth / 2;
+  const impressionY = (value: number) => padding.top + plotHeight - (value / maxImpressions) * plotHeight;
+  const clickY = (value: number) => padding.top + plotHeight - (value / maxClicks) * plotHeight;
+  const clickPath = points.map((point, index) => `${index ? "L" : "M"}${x(index)},${clickY(point.clicks)}`).join(" ");
+  const gridValues = [0, 0.5, 1];
+  const labelIndexes = new Set([0, Math.floor((points.length - 1) / 2), points.length - 1]);
+
+  return (
+    <div className="gsc-chart-wrap">
+      <div className="gsc-chart-legend">
+        <span className="clicks">Clicks</span>
+        <span className="impressions">Impressions</span>
+      </div>
+      <svg className="gsc-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Google Search Console clicks and impressions over time">
+        {gridValues.map((ratio) => {
+          const y = padding.top + plotHeight - ratio * plotHeight;
+          return (
+            <g key={ratio}>
+              <line className="chart-grid-line" x1={padding.left} x2={width - padding.right} y1={y} y2={y} />
+              <text className="chart-axis-label" x={padding.left - 8} y={y + 4} textAnchor="end">{Math.round(maxImpressions * ratio).toLocaleString("en-GB")}</text>
+              <text className="chart-axis-label" x={width - padding.right + 8} y={y + 4}>{Math.round(maxClicks * ratio).toLocaleString("en-GB")}</text>
+            </g>
+          );
+        })}
+        {points.map((point, index) => (
+          <rect
+            className="gsc-impression-bar"
+            height={padding.top + plotHeight - impressionY(point.impressions)}
+            key={point.date}
+            width={barWidth}
+            x={x(index) - barWidth / 2}
+            y={impressionY(point.impressions)}
+          >
+            <title>{point.label}: {point.impressions.toLocaleString("en-GB")} impressions</title>
+          </rect>
+        ))}
+        <path className="gsc-click-line" d={clickPath} />
+        {points.map((point, index) => (
+          <g key={`click-${point.date}`}>
+            <circle className="gsc-click-point" cx={x(index)} cy={clickY(point.clicks)} r="2.4">
+              <title>{point.label}: {point.clicks.toLocaleString("en-GB")} clicks</title>
+            </circle>
+            {labelIndexes.has(index) ? (
+              <text className="chart-axis-label" x={x(index)} y={height - 10} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"}>{point.label}</text>
+            ) : null}
+          </g>
+        ))}
       </svg>
     </div>
   );
