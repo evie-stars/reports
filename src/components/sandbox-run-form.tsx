@@ -71,7 +71,6 @@ export function SandboxRunForm({
           name="searchTypes"
           choices={[
             { id: "organic", label: "Organic" },
-            { id: "local_finder", label: "Local Finder" },
             { id: "maps", label: "Google Maps" }
           ]}
           selected={searchTypes}

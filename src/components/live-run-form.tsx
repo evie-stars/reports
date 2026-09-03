@@ -69,7 +69,6 @@ export function LiveRunForm({
           Result type
           <select name="searchType" value={searchType} onChange={(event) => changeSearchType(event.target.value)}>
             <option value="organic">Organic</option>
-            <option value="local_finder">Local Finder</option>
             <option value="maps">Google Maps</option>
           </select>
         </label>

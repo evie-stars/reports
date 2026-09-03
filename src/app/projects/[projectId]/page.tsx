@@ -48,11 +48,12 @@ export default async function ProjectDetailPage({
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const metricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
+  const scheduledSearchTypes = project.scheduleSearchTypes.filter((type) => type !== "local_finder");
   const scheduleEstimate = estimateRankRunCost({
     keywordCount: activeKeywords.length,
     locationCount: activeLocations.length,
     devices: project.scheduleDevices,
-    searchTypes: project.scheduleSearchTypes,
+    searchTypes: scheduledSearchTypes.length > 0 ? scheduledSearchTypes : ["organic"],
     pageLimit: project.schedulePageLimit
   }, "standard");
   const queueMetrics = queueKeywordMetrics.bind(null, project.id);
@@ -143,14 +144,13 @@ export default async function ProjectDetailPage({
             <legend>Results</legend>
             <div className="choice-list horizontal">
               <label><input name="scheduleSearchTypes" type="checkbox" value="organic" defaultChecked={project.scheduleSearchTypes.includes("organic")} />Organic</label>
-              <label><input name="scheduleSearchTypes" type="checkbox" value="local_finder" defaultChecked={project.scheduleSearchTypes.includes("local_finder")} />Local Finder</label>
               <label><input name="scheduleSearchTypes" type="checkbox" value="maps" defaultChecked={project.scheduleSearchTypes.includes("maps")} />Maps</label>
             </div>
           </fieldset>
         </div>
         <div className="schedule-footer">
           <p className="muted form-note">
-            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * project.scheduleSearchTypes.length} Standard task(s). Maximum estimate: ${scheduleEstimate.toFixed(4)} per report.
+            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * Math.max(1, scheduledSearchTypes.length)} Standard task(s). Maximum estimate: ${scheduleEstimate.toFixed(4)} per report.
           </p>
           <button className="button" type="submit">Save Schedule</button>
         </div>

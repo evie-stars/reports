@@ -5,7 +5,7 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 ## Version 1 Scope
 
 - Manage clients, projects, tracked keywords, locations, and competitors.
-- Store immutable rank-run snapshots for organic, local finder, Google Maps, and SERP feature data.
+- Store immutable rank-run snapshots for organic, Google Maps, and SERP feature data.
 - Default to DataForSEO Sandbox so setup and parser work does not spend trial credit.
 - Queue guarded live checks, ad hoc reports, and monthly schedules.
 - Restrict the reporting workspace with approved Google accounts and admin/sales roles.
@@ -28,7 +28,7 @@ The sandbox action always calls the DataForSEO sandbox host and cannot be promot
 
 The project page includes a one-task Live verification control and a monthly report schedule. Live is retained only for immediate, one-keyword checks. Ad hoc and scheduled reports use DataForSEO Standard tasks, which are submitted in batches and collected by later worker runs. Paid checks are stored as queue records and processed sequentially by `npm run rank:worker`.
 
-Organic checks can be capped between one and ten result pages. The cost preview accounts for each organic page; Local Finder and Maps each count as one task unit. Search operators that can multiply DataForSEO cost are blocked. `DATAFORSEO_MAX_LIVE_TASKS_PER_RUN` caps immediate checks and `DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN` caps full reports.
+Organic checks can be capped between one and ten result pages, while Google Maps counts as one task unit. The cost preview accounts for each selected result type and device. Search operators that can multiply DataForSEO cost are blocked. `DATAFORSEO_MAX_LIVE_TASKS_PER_RUN` caps immediate checks and `DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN` caps full reports.
 
 `DATAFORSEO_MONTHLY_BUDGET_USD` is a hard application-level monthly ceiling. The queue reserves the maximum estimated cost before accepting a run, then stores the exact DataForSEO-reported charge. Polling requests are excluded from spend totals so task cost is not counted twice. The Rank Runs screen shows current spend, reservations, available budget, task progress, failures, retries, and upcoming schedules.
 

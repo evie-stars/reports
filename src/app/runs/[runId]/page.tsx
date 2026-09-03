@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Icon } from "@/components/icon";
+import { buildRankMatrix, RankMatrix, type RankMatrixResult } from "@/components/rank-matrix";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
 
@@ -25,6 +26,22 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
 
   const failedRequests = run.apiRequests.filter((request) => request.errorMessage);
   const matchedResults = run.results.filter((result) => result.matched).length;
+  const matrixResults: RankMatrixResult[] = run.results.map((result) => ({
+    id: result.id,
+    projectId: run.projectId,
+    keywordId: result.keywordId,
+    keyword: result.keyword.phrase,
+    locationId: result.locationId,
+    location: result.location.name,
+    searchType: result.searchType,
+    device: result.device,
+    rank: result.rankAbsolute ?? result.rankGroup,
+    previousRank: result.previousRank,
+    direction: result.direction,
+    matchedUrl: result.matchedUrl,
+    details: Array.from(new Set(result.serpFeatures.map((feature) => readableType(feature.type))))
+  }));
+  const matrixRowCount = buildRankMatrix(matrixResults).rows.length;
 
   return (
     <>
@@ -59,57 +76,15 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
         <RunMetric label="Cost" value={`$${run.actualCostUsd.toString()}`} />
       </section>
 
-      <section className="card" style={{ marginTop: 18 }}>
+      <section className="card report-table-card run-results-card" style={{ marginTop: 18 }}>
         <div className="section-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Ranking Results</p>
             <h3>{run.sandbox ? "Sandbox" : "Live"} result snapshot</h3>
           </div>
-          <span className="muted">{run.notes}</span>
+          <span className="muted">{matrixRowCount} keyword{matrixRowCount === 1 ? "" : "s"} · {run.notes}</span>
         </div>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Keyword</th>
-                <th>Location</th>
-                <th>Type</th>
-                <th>Device</th>
-                <th>Rank</th>
-                <th>Movement</th>
-                <th>Matched URL</th>
-                <th>SERP Features</th>
-              </tr>
-            </thead>
-            <tbody>
-              {run.results.map((result) => {
-                const rank = result.rankAbsolute ?? result.rankGroup;
-                const featureTypes = Array.from(new Set(result.serpFeatures.map((feature) => readableType(feature.type))));
-                return (
-                  <tr key={result.id}>
-                    <td><strong>{result.keyword.phrase}</strong></td>
-                    <td>{result.location.name}</td>
-                    <td>{readableType(result.searchType)}</td>
-                    <td>{readableType(result.device)}</td>
-                    <td>{rank ?? <span className="muted">Not found</span>}</td>
-                    <td><Movement direction={result.direction} previousRank={result.previousRank} /></td>
-                    <td>
-                      {result.matchedUrl ? (
-                        <a className="result-url" href={result.matchedUrl} target="_blank" rel="noreferrer">
-                          {result.matchedUrl}
-                        </a>
-                      ) : <span className="muted">No match</span>}
-                    </td>
-                    <td>{featureTypes.length > 0 ? featureTypes.join(", ") : <span className="muted">None</span>}</td>
-                  </tr>
-                );
-              })}
-              {run.results.length === 0 ? (
-                <tr><td colSpan={8} className="muted">No ranking results were stored for this run.</td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        <RankMatrix results={matrixResults} emptyMessage="No ranking results were stored for this run." />
       </section>
 
       <section className="card" style={{ marginTop: 18 }}>
@@ -152,15 +127,6 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
 
 function RunMetric({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Movement({ direction, previousRank }: { direction: string | null; previousRank: number | null }) {
-  if (!direction) return <span className="muted">-</span>;
-  return (
-    <span className={`status ${direction === "up" || direction === "new" ? "good" : direction === "down" || direction === "lost" ? "danger" : ""}`}>
-      {readableType(direction)}{previousRank !== null ? ` · was ${previousRank}` : ""}
-    </span>
-  );
 }
 
 function statusClass(status: string) {

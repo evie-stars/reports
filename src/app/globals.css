@@ -791,6 +791,166 @@ button.status:hover {
   padding-bottom: 8px;
 }
 
+.rank-matrix-scroll {
+  margin-top: 10px;
+}
+
+.rank-matrix-table {
+  font-size: 11px;
+  min-width: 760px;
+  table-layout: auto;
+}
+
+.rank-matrix-table th,
+.rank-matrix-table td {
+  padding: 6px 7px;
+}
+
+.rank-matrix-table th {
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.rank-matrix-table tbody tr:hover {
+  background: rgba(34, 101, 179, 0.045);
+}
+
+.matrix-keyword-heading,
+.matrix-keyword-cell {
+  min-width: 190px;
+}
+
+.matrix-keyword-cell strong,
+.matrix-keyword-cell .keyword-history-link {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.matrix-area-heading {
+  min-width: 92px;
+}
+
+.matrix-volume-heading {
+  min-width: 58px;
+}
+
+.matrix-result-heading {
+  min-width: 78px;
+  text-align: center !important;
+}
+
+.matrix-result-heading span,
+.matrix-result-heading small {
+  display: block;
+}
+
+.matrix-result-heading small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.matrix-date-heading,
+.matrix-date-cell {
+  min-width: 76px;
+  white-space: nowrap;
+}
+
+.matrix-result-cell {
+  text-align: center !important;
+}
+
+.matrix-rank {
+  align-items: center;
+  background: var(--surface-strong);
+  border-radius: 5px;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 46px;
+  padding: 3px 5px;
+  position: relative;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.matrix-rank:hover {
+  transform: translateY(-1px);
+}
+
+.matrix-rank.up,
+.matrix-rank.new {
+  background: #e0f2e9;
+  color: #287a50;
+}
+
+.matrix-rank.down {
+  background: #fde8e6;
+  color: #b92e27;
+}
+
+.matrix-rank > a,
+.matrix-rank > span {
+  color: inherit !important;
+  font-size: 11px;
+  font-weight: 700 !important;
+  line-height: 1;
+}
+
+.matrix-rank > a:hover {
+  text-decoration: underline;
+}
+
+.matrix-rank small {
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.matrix-rank i {
+  align-items: center;
+  background: #f4bd5c;
+  border-radius: 50%;
+  color: #624006;
+  display: inline-flex;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 800;
+  height: 12px;
+  justify-content: center;
+  width: 12px;
+}
+
+.matrix-empty-cell {
+  color: var(--muted);
+}
+
+.matrix-sort-links {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: flex-end;
+  margin: -2px 0 2px;
+}
+
+.matrix-sort-links::before {
+  color: var(--muted);
+  content: "Sort:";
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.matrix-sort-links .sort-header {
+  font-size: 9px;
+}
+
+.run-results-card .section-heading {
+  margin-bottom: 0;
+}
+
 .rank-cell {
   font-size: 16px;
   font-weight: 700;

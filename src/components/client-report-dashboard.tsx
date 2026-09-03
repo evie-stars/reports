@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Icon } from "@/components/icon";
+import { buildRankMatrix, RankMatrix, type RankMatrixResult } from "@/components/rank-matrix";
 import type { ClientReportData, CurrentReportResult } from "@/lib/client-report";
 
 export function ClientReportDashboard({
@@ -13,6 +14,8 @@ export function ClientReportDashboard({
 }) {
   const { filters, latestResults, stats } = data;
   const closeDrawerHref = reportHref(basePath, filters);
+  const matrixResults = latestResults.map(toMatrixResult);
+  const matrixRowCount = buildRankMatrix(matrixResults).rows.length;
 
   return (
     <>
@@ -69,7 +72,6 @@ export function ClientReportDashboard({
         <FilterSelect label="Result" name="type" value={filters.searchType ?? ""}>
           <option value="">All results</option>
           <option value="organic">Organic</option>
-          <option value="local_finder">Local Finder</option>
           <option value="maps">Maps</option>
         </FilterSelect>
         {data.options.groups.length > 0 ? (
@@ -90,37 +92,21 @@ export function ClientReportDashboard({
             <p className="label label-with-icon"><Icon name="graph" />Ranking Results</p>
             <h3>Current and previous positions</h3>
           </div>
-          <span className="muted">{latestResults.length} result{latestResults.length === 1 ? "" : "s"}</span>
+          <span className="muted">{matrixRowCount} keyword{matrixRowCount === 1 ? "" : "s"}</span>
         </div>
-        <div className="table-scroll">
-          <table className="table comparison-table">
-            <thead>
-              <tr>
-                <SortableHeader basePath={basePath} column="keyword" filters={filters} label="Keyword" />
-                <SortableHeader basePath={basePath} column="area" filters={filters} label="Area" />
-                <th>Volume</th>
-                <th>Result</th>
-                <SortableHeader basePath={basePath} column="current" filters={filters} label="Current" />
-                <th>Previous</th>
-                <th>Change</th>
-                <th>Ranked URL</th>
-                <th>Checked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {latestResults.map((result) => (
-                <RankingRow key={result.id} result={result} href={reportHref(basePath, filters, result.keywordId)} />
-              ))}
-              {latestResults.length === 0 ? (
-                <tr>
-                  <td className="empty-table" colSpan={9}>
-                    No live rankings match these filters{readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+        <div className="matrix-sort-links" aria-label="Ranking result sorting">
+          <SortableLink basePath={basePath} column="keyword" filters={filters} label="Keyword" />
+          <SortableLink basePath={basePath} column="area" filters={filters} label="Area" />
+          <SortableLink basePath={basePath} column="current" filters={filters} label="Best rank" />
         </div>
+        <RankMatrix
+          results={matrixResults}
+          emptyMessage={`No live rankings match these filters${readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}`}
+          keywordHref={(keywordId) => reportHref(basePath, filters, keywordId)}
+          showChecked
+          showProject
+          showVolume
+        />
       </section>
 
       {data.selectedKeyword ? (
@@ -137,7 +123,7 @@ export function ClientReportDashboard({
   );
 }
 
-function SortableHeader({
+function SortableLink({
   basePath,
   column,
   filters,
@@ -153,11 +139,9 @@ function SortableHeader({
   const href = reportHref(basePath, { ...filters, sort: column, sortDirection: nextDirection });
   const indicator = active ? (filters.sortDirection === "asc" ? "↑" : "↓") : "↕";
   return (
-    <th scope="col" aria-sort={active ? (filters.sortDirection === "asc" ? "ascending" : "descending") : "none"}>
-      <Link className={`sort-header${active ? " active" : ""}`} href={href} scroll={false} title={`Sort ${label.toLowerCase()} ${nextDirection === "asc" ? "ascending" : "descending"}`}>
-        {label}<span className="sort-indicator" aria-hidden="true">{indicator}</span>
-      </Link>
-    </th>
+    <Link className={`sort-header${active ? " active" : ""}`} href={href} scroll={false} title={`Sort ${label.toLowerCase()} ${nextDirection === "asc" ? "ascending" : "descending"}`}>
+      {label}<span className="sort-indicator" aria-hidden="true">{indicator}</span>
+    </Link>
   );
 }
 
@@ -180,39 +164,26 @@ function FilterSelect({ label, name, value, children }: { label: string; name: s
   );
 }
 
-function RankingRow({ result, href }: { result: CurrentReportResult; href: string }) {
-  const state = movementState(result.direction);
-  return (
-    <tr className={`ranking-row ${state}`}>
-      <td>
-        <Link className="keyword-history-link" href={href} scroll={false}>{result.keyword.phrase}</Link>
-        <small className="row-context">{result.run.project.name} · {readableType(result.device)}</small>
-      </td>
-      <td>{result.location.name}</td>
-      <td>{result.keyword.searchVolume?.toLocaleString("en-GB") ?? "-"}</td>
-      <td>{readableType(result.searchType)}</td>
-      <td><span className={`rank-highlight ${state}`}>{result.rank ?? "-"}</span></td>
-      <td>{result.previousRank ?? "-"}</td>
-      <td><Movement result={result} /></td>
-      <td>
-        {result.matchedUrl ? (
-          <a className="result-url" href={result.matchedUrl} target="_blank" rel="noreferrer">{shortUrl(result.matchedUrl)}</a>
-        ) : <span className="muted">Not found</span>}
-        {result.issues.length > 0 ? (
-          <div className="issue-list">{result.issues.map((issue) => <span key={issue}>{issue}</span>)}</div>
-        ) : null}
-      </td>
-      <td>{result.checkedAt.toLocaleDateString("en-GB")}</td>
-    </tr>
-  );
-}
-
-function Movement({ result }: { result: CurrentReportResult }) {
-  if (result.direction === "new") return <span className="change-label new">New</span>;
-  if (result.direction === "lost") return <span className="change-label down">Lost</span>;
-  if (result.movement === null || result.movement === 0) return <span className="change-label unchanged">No change</span>;
-  if (result.movement > 0) return <span className="change-label up">+{result.movement}</span>;
-  return <span className="change-label down">{result.movement}</span>;
+function toMatrixResult(result: CurrentReportResult): RankMatrixResult {
+  return {
+    id: result.id,
+    projectId: result.run.projectId,
+    projectName: result.run.project.name,
+    keywordId: result.keywordId,
+    keyword: result.keyword.phrase,
+    locationId: result.locationId,
+    location: result.location.name,
+    searchVolume: result.keyword.searchVolume,
+    searchType: result.searchType,
+    device: result.device,
+    rank: result.rank,
+    previousRank: result.previousRank,
+    direction: result.direction,
+    movement: result.movement,
+    matchedUrl: result.matchedUrl,
+    checkedAt: result.checkedAt,
+    issues: result.issues
+  };
 }
 
 function PageOneTrendChart({ points }: { points: ClientReportData["trend"] }) {
@@ -368,13 +339,6 @@ function reportHref(basePath: string, filters: ClientReportData["filters"], keyw
   if (keywordId) params.set("keyword", keywordId);
   const query = params.toString();
   return query ? `${basePath}?${query}` : basePath;
-}
-
-function movementState(direction: string | null) {
-  if (direction === "up") return "up";
-  if (direction === "down" || direction === "lost") return "down";
-  if (direction === "new") return "new";
-  return "unchanged";
 }
 
 function readableType(value: string) {

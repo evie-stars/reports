@@ -52,7 +52,7 @@ const sandboxRunSchema = z.object({
   keywordIds: z.array(z.string().trim().min(1)).transform(uniqueValues),
   locationIds: z.array(z.string().trim().min(1)).transform(uniqueValues),
   devices: z.array(z.enum(["desktop", "mobile"])).transform(uniqueValues),
-  searchTypes: z.array(z.enum(["organic", "local_finder", "maps"])).transform(uniqueValues)
+  searchTypes: z.array(z.enum(["organic", "maps"])).transform(uniqueValues)
 });
 
 const liveRunSchema = z.object({
@@ -60,7 +60,7 @@ const liveRunSchema = z.object({
   keywordId: z.string().trim().min(1),
   locationId: z.string().trim().min(1),
   device: z.enum(["desktop", "mobile"]),
-  searchType: z.enum(["organic", "local_finder", "maps"]),
+  searchType: z.enum(["organic", "maps"]),
   pageLimit: z.coerce.number().int().min(1).max(10),
   confirmLiveCost: z.literal("yes")
 });
@@ -69,7 +69,7 @@ const scheduleSchema = z.object({
   scheduleEnabled: z.boolean(),
   scheduleDay: z.coerce.number().int().min(1).max(28),
   scheduleDevices: z.array(z.enum(["desktop", "mobile"])).min(1),
-  scheduleSearchTypes: z.array(z.enum(["organic", "local_finder", "maps"])).min(1),
+  scheduleSearchTypes: z.array(z.enum(["organic", "maps"])).min(1),
   schedulePageLimit: z.coerce.number().int().min(1).max(10)
 });
 

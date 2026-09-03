@@ -3,6 +3,7 @@ import test from "node:test";
 import { DataForSeoClient } from "../src/lib/dataforseo";
 import { estimateRankRunCost } from "../src/lib/dataforseo-costs";
 import { readKeywordMetrics } from "../src/lib/keyword-metrics";
+import { buildRankMatrix } from "../src/components/rank-matrix";
 import { readTaskState } from "../src/lib/rank-standard";
 
 test("estimates Standard SERP pages before a report is queued", () => {
@@ -73,4 +74,27 @@ test("parses search volume, CPC, competition, and monthly trends", () => {
   assert.equal(metrics[0].cpc, 2.45);
   assert.equal(metrics[0].competition, 0.42);
   assert.deepEqual(metrics[0].monthlySearches, monthlySearches);
+});
+
+test("groups result types and devices into one ranking row per keyword and area", () => {
+  const base = {
+    projectId: "project-1",
+    projectName: "Main Website",
+    keywordId: "keyword-1",
+    keyword: "builder cheshire",
+    locationId: "location-1",
+    location: "Chester",
+    previousRank: null,
+    direction: null,
+    matchedUrl: null
+  };
+  const matrix = buildRankMatrix([
+    { ...base, id: "organic-desktop", searchType: "organic", device: "desktop", rank: 8 },
+    { ...base, id: "organic-mobile", searchType: "organic", device: "mobile", rank: 10 },
+    { ...base, id: "maps-desktop", searchType: "maps", device: "desktop", rank: 2 }
+  ]);
+
+  assert.equal(matrix.rows.length, 1);
+  assert.deepEqual(matrix.columns.map((column) => column.key), ["organic:desktop", "organic:mobile", "maps:desktop"]);
+  assert.equal(matrix.rows[0].cells["maps:desktop"].rank, 2);
 });

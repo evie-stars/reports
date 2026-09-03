@@ -49,7 +49,7 @@ export async function enqueueProjectRerun(input: {
     keywordIds: project.keywords.map(({ id }) => id),
     locationIds: project.locations.map(({ id }) => id),
     devices: project.scheduleDevices,
-    searchTypes: project.scheduleSearchTypes,
+    searchTypes: currentSearchTypes(project.scheduleSearchTypes),
     pageLimit: project.schedulePageLimit
   }, "manual", input.requestedByEmail);
 }
@@ -95,7 +95,11 @@ export async function retryRankRun(runId: string, requestedByEmail: string) {
   const run = await prisma.rankRun.findUnique({ where: { id: runId } });
   if (!run || !["failed", "blocked"].includes(run.status)) throw new Error("Only failed or blocked reports can be retried.");
   const selection = queueSelectionSchema.parse(run.selection);
-  return enqueueSelection(selection, run.source === "scheduled" ? "scheduled" : "manual", requestedByEmail);
+  return enqueueSelection(
+    { ...selection, searchTypes: currentSearchTypes(selection.searchTypes) },
+    run.source === "scheduled" ? "scheduled" : "manual",
+    requestedByEmail
+  );
 }
 
 export async function enqueueDueSchedules(now = new Date()) {
@@ -120,7 +124,7 @@ export async function enqueueDueSchedules(now = new Date()) {
       keywordIds: project.keywords.map(({ id }) => id),
       locationIds: project.locations.map(({ id }) => id),
       devices: project.scheduleDevices,
-      searchTypes: project.scheduleSearchTypes,
+      searchTypes: currentSearchTypes(project.scheduleSearchTypes),
       pageLimit: project.schedulePageLimit
     };
     const requestedTasks = selection.keywordIds.length * selection.locationIds.length *
@@ -248,6 +252,11 @@ function rankSelection(selection: QueueSelection): RankRunSelection {
     devices: selection.devices,
     searchTypes: selection.searchTypes
   };
+}
+
+function currentSearchTypes(searchTypes: SearchType[]) {
+  const filtered = searchTypes.filter((searchType) => searchType !== SearchType.local_finder);
+  return filtered.length > 0 ? filtered : [SearchType.organic];
 }
 
 function configuredMaxJobs() {

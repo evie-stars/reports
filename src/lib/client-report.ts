@@ -55,7 +55,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
     },
     ...(filters.locationId ? { locationId: filters.locationId } : {}),
     ...(filters.device ? { device: filters.device } : {}),
-    ...(filters.searchType ? { searchType: filters.searchType } : {})
+    searchType: filters.searchType ? filters.searchType : { in: [SearchType.organic, SearchType.maps] }
   };
 
   const descendingResults = await prisma.rankResult.findMany({
