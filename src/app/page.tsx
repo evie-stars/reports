@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
 import { Icon } from "@/components/icon";
+import { workerHealth } from "@/lib/worker-health";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function DashboardPage() {
   const dataForSeoConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const liveApiEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const googleSignInEnabled = process.env.AUTH_ENABLED === "true";
+  const worker = workerHealth(data.heartbeat);
 
   return (
     <>
@@ -22,6 +24,16 @@ export default async function DashboardPage() {
       </header>
 
       {data.dbUnavailable ? <SetupNotice /> : null}
+      {!data.dbUnavailable && (data.failedRuns > 0 || !worker.healthy) ? (
+        <div className="notice danger-notice operations-alert">
+          <strong>Operations need attention.</strong>
+          <span>
+            {data.failedRuns > 0 ? ` ${data.failedRuns} report job${data.failedRuns === 1 ? " has" : "s have"} failed or been blocked in the last 7 days.` : ""}
+            {!worker.healthy ? ` The rank worker is ${worker.label.toLowerCase()}.` : ""}
+          </span>
+          <Link href="/runs">Review rank runs</Link>
+        </div>
+      ) : null}
 
       <div className="dashboard-command-grid">
         <section className="dashboard-actions" aria-labelledby="quick-actions-title">
@@ -51,7 +63,9 @@ export default async function DashboardPage() {
             <ConfigurationItem label="DataForSEO" value={dataForSeoConfigured ? "Connected" : "Credentials missing"} good={dataForSeoConfigured} />
             <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
             <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
+            <ConfigurationItem label="Rank worker" value={worker.label} good={worker.healthy} />
             <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
+            <ConfigurationItem label="Failed jobs" value={data.failedRuns ? `${data.failedRuns} in 7 days` : "None"} good={data.failedRuns === 0} />
             <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
           </div>
         </section>
@@ -98,13 +112,16 @@ export default async function DashboardPage() {
 
 async function getDashboardData() {
   try {
-    const [clients, projects, keywords, locations, schedules, queuedRuns, runs] = await Promise.all([
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
       prisma.location.count({ where: { active: true } }),
       prisma.project.count({ where: { scheduleEnabled: true } }),
       prisma.rankRun.count({ where: { status: { in: ["queued", "running"] } } }),
+      prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
+      prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
       prisma.rankRun.findMany({
         orderBy: { createdAt: "desc" },
         take: 5,
@@ -112,9 +129,20 @@ async function getDashboardData() {
       })
     ]);
 
-    return { clients, projects, keywords, locations, schedules, queuedRuns, runs, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, dbUnavailable: false };
   } catch {
-    return { clients: 0, projects: 0, keywords: 0, locations: 0, schedules: 0, queuedRuns: 0, runs: [], dbUnavailable: true };
+    return {
+      clients: 0,
+      projects: 0,
+      keywords: 0,
+      locations: 0,
+      schedules: 0,
+      queuedRuns: 0,
+      failedRuns: 0,
+      heartbeat: null,
+      runs: [],
+      dbUnavailable: true
+    };
   }
 }
 

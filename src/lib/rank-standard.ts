@@ -1,6 +1,7 @@
 import { Prisma, type RankTask, type SearchType } from "@prisma/client";
 import { DataForSeoClient, type DataForSeoApiResponse, type DataForSeoTask } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
+import { writeAuditLog } from "@/lib/audit";
 import {
   buildDataForSeoTask,
   getDataForSeoError,
@@ -237,6 +238,17 @@ async function refreshStandardRun(runId: string) {
       ...(done ? { completedAt: new Date() } : {})
     }
   });
+  if (done) {
+    await writeAuditLog({
+      event: status === "completed" ? "report.run_completed" : "report.run_failed",
+      outcome: status === "completed" ? "success" : "failure",
+      actorEmail: "system",
+      actorRole: "system",
+      entityType: "rankRun",
+      entityId: runId,
+      metadata: { completedTasks, failedTasks }
+    });
+  }
   return runId;
 }
 

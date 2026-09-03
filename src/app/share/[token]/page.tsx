@@ -14,7 +14,11 @@ export default async function SharedClientReportPage({ params, searchParams }: {
   const resolvedSearchParams = await searchParams;
   const client = await prisma.client.findUnique({ where: { shareToken: token } });
 
-  if (!client?.shareEnabled) notFound();
+  if (
+    !client?.shareEnabled ||
+    !client.shareExpiresAt ||
+    client.shareExpiresAt <= new Date()
+  ) notFound();
 
   const reportData = await getClientReportData(client.id, resolvedSearchParams);
   if (!reportData) notFound();
@@ -26,7 +30,10 @@ export default async function SharedClientReportPage({ params, searchParams }: {
           <Image src="/star-websites.png" alt="Star Websites" width={88} height={34} priority />
           <span>Report Hub</span>
         </div>
-        <span className="status good">Read-only report</span>
+        <div className="shared-access-status">
+          <span className="status good">Read-only report</span>
+          <span>Expires {client.shareExpiresAt.toLocaleDateString("en-GB")}</span>
+        </div>
       </header>
       <header className="page-header client-report-header shared-client-header">
         <div>

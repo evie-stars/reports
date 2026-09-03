@@ -1,5 +1,6 @@
 import { auth, signOut } from "../../auth";
-import { authenticationEnabled } from "@/lib/access";
+import { authenticationEnabled, currentActor } from "@/lib/access";
+import { writeRequestAudit } from "@/lib/audit";
 
 export async function AccountControl() {
   if (!authenticationEnabled()) return <span className="status warn">Sign-in not enabled</span>;
@@ -11,6 +12,12 @@ export async function AccountControl() {
       <span className="status">{session.user.role}</span>
       <form action={async () => {
         "use server";
+        const actor = await currentActor();
+        await writeRequestAudit({
+          event: "auth.sign_out",
+          actorEmail: actor.email,
+          actorRole: actor.role
+        });
         await signOut({ redirectTo: "/login" });
       }}>
         <button type="submit">Sign out</button>

@@ -48,17 +48,20 @@ Authentication is off until `AUTH_ENABLED=true`. Create a Google OAuth web clien
 https://reports.starwebsites.co.uk/api/auth/callback/google
 ```
 
-Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access; other approved accounts receive the sales role. A verified Google email must still match the allowlist. Client share URLs remain read-only bearer links and do not require a Google account.
+Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access; other approved accounts receive the sales role. A verified Google email must still match the allowlist. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
-## Security Backlog
+## Security Controls
 
-Return to these items before broader client access or adding GA4 and Google Search Console data:
+- Global CSP, HSTS, frame, MIME-sniffing, referrer, and browser-permission headers are applied by Next.js.
+- Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, and share-link changes are stored in the admin audit trail.
+- Database-backed limits protect authenticated mutations, paid reports, share-link changes, Google sign-ins, and the locations API. Limits are configurable with the `RATE_LIMIT_*` environment variables.
+- The rank worker records a heartbeat on every run. The dashboard and Settings page flag stale workers and failed or blocked jobs from the last seven days.
+- Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account.
 
-2. Harden read-only client links with expiry dates, token regeneration, revocation, and optional client-email authentication.
-3. Set an explicit short session lifetime, initially 8-12 hours, and review session revocation behaviour.
-4. Add and verify production security headers, including HSTS, Content Security Policy, frame protection, and a strict referrer policy.
-5. Add audit logging for successful and failed sign-ins, report changes, paid API runs, role-sensitive actions, and share-link changes.
-6. Add rate limits to sensitive server actions and API endpoints, in addition to the existing report queue and worker pacing.
+## Remaining Security Work
+
+Complete these infrastructure-level items before connecting GA4 or Google Search Console accounts:
+
 7. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
 10. Complete a focused application and infrastructure security review before connecting GA4 or Google Search Console accounts.
 
@@ -97,7 +100,7 @@ Return to these items before broader client access or adding GA4 and Google Sear
 1. Create a Node.js app in Plesk pointing at this project directory.
 2. Set the application startup file to `server.js`.
 3. Set the document root to the `public` subdirectory.
-4. Add the environment variables from `.env.example` in Plesk.
+4. Add the environment variables from `.env.example` in Plesk. Security and rate-limit values have conservative defaults, but should be set explicitly in production.
 5. Create the database in Plesk and use the connection string as `DATABASE_URL`.
 6. Run:
 
@@ -114,7 +117,7 @@ Return to these items before broader client access or adding GA4 and Google Sear
    cd /var/www/vhosts/reports.starwebsites.co.uk && npm run rank:worker
    ```
 
-The exact `cd` path must be the application root shown by Plesk. The worker enqueues due monthly schedules, submits or collects Standard ranking tasks, and then processes optional keyword metrics. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
+The exact `cd` path must be the application root shown by Plesk. The worker enqueues due monthly schedules, submits or collects Standard ranking tasks, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
 
 ## DataForSEO Safety
 

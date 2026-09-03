@@ -4,13 +4,21 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { currentActor, requireAdmin } from "@/lib/access";
+import { currentActor, requireAdmin, type CurrentActor } from "@/lib/access";
+import { writeRequestAudit } from "@/lib/audit";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
 import { importRankHistoryCsv } from "@/lib/rank-history-import";
 import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/rank-queue";
 import { executeSandboxRankRun } from "@/lib/rank-runner";
 import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
+import {
+  actionRateLimit,
+  enforceRateLimit,
+  paidRunRateLimit,
+  shareRateLimit,
+  type RateLimitPolicy
+} from "@/lib/rate-limit";
 
 const optionalText = z.string().trim().optional().transform((value) => value || null);
 
@@ -74,16 +82,17 @@ const scheduleSchema = z.object({
 });
 
 export async function createClient(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   const client = await prisma.client.create({ data });
+  await auditAction("client.created", actor, "client", client.id);
 
   revalidatePath("/clients");
   redirect(`/clients/${client.id}?view=settings`);
 }
 
 export async function importRankHistory(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   let clientId: string;
 
   try {
@@ -97,8 +106,14 @@ export async function importRankHistory(formData: FormData) {
       projectName: stringFromForm(formData.get("projectName"))
     });
     clientId = result.clientId;
+    await auditAction("client.history_imported", actor, "client", result.clientId, {
+      projectId: result.projectId,
+      keywordCount: result.keywordCount,
+      resultCount: result.resultCount
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to import the historical rankings.";
+    await auditAction("client.history_imported", actor, "client", null, { error: message }, "failure");
     redirect(`/clients?import=1&importError=${encodeURIComponent(message)}`);
   }
 
@@ -108,40 +123,68 @@ export async function importRankHistory(formData: FormData) {
 }
 
 export async function updateClient(clientId: string, formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   await prisma.client.update({ where: { id: clientId }, data });
+  await auditAction("client.updated", actor, "client", clientId);
 
   revalidatePath("/clients");
   revalidatePath(`/clients/${clientId}`);
 }
 
-export async function enableClientShare(clientId: string) {
-  await requireAdmin();
-  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { shareToken: true } });
+export async function enableClientShare(clientId: string, formData?: FormData) {
+  const actor = await guardedAdminAction("share", shareRateLimit());
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true } });
   if (!client) throw new Error("Client not found.");
+  const expiresAt = shareExpiry(formData);
 
   await prisma.client.update({
     where: { id: clientId },
     data: {
       shareEnabled: true,
-      shareToken: client.shareToken ?? randomBytes(24).toString("base64url")
+      shareToken: randomBytes(24).toString("base64url"),
+      shareCreatedAt: new Date(),
+      shareExpiresAt: expiresAt,
+      shareRevokedAt: null
     }
   });
+  await auditAction("client.share_created", actor, "client", clientId, { expiresAt: expiresAt.toISOString() });
 
   revalidatePath(`/clients/${clientId}`);
 }
 
 export async function disableClientShare(clientId: string) {
-  await requireAdmin();
-  await prisma.client.update({ where: { id: clientId }, data: { shareEnabled: false } });
+  const actor = await guardedAdminAction("share", shareRateLimit());
+  await prisma.client.update({
+    where: { id: clientId },
+    data: { shareEnabled: false, shareToken: null, shareExpiresAt: null, shareRevokedAt: new Date() }
+  });
+  await auditAction("client.share_revoked", actor, "client", clientId);
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function regenerateClientShare(clientId: string, formData: FormData) {
+  const actor = await guardedAdminAction("share", shareRateLimit());
+  const expiresAt = shareExpiry(formData);
+  await prisma.client.update({
+    where: { id: clientId },
+    data: {
+      shareEnabled: true,
+      shareToken: randomBytes(24).toString("base64url"),
+      shareCreatedAt: new Date(),
+      shareExpiresAt: expiresAt,
+      shareRevokedAt: null
+    }
+  });
+  await auditAction("client.share_regenerated", actor, "client", clientId, { expiresAt: expiresAt.toISOString() });
   revalidatePath(`/clients/${clientId}`);
 }
 
 export async function createProject(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   const project = await prisma.project.create({ data });
+  await auditAction("project.created", actor, "project", project.id, { clientId: data.clientId });
 
   revalidatePath("/clients");
   revalidatePath(`/clients/${data.clientId}`);
@@ -149,24 +192,26 @@ export async function createProject(formData: FormData) {
 }
 
 export async function updateProject(projectId: string, formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   await prisma.project.update({ where: { id: projectId }, data });
+  await auditAction("project.updated", actor, "project", projectId, { clientId: data.clientId });
 
   revalidatePath(`/clients/${data.clientId}`);
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function createKeyword(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = keywordSchema.parse(readForm(formData, ["projectId", "phrase", "group", "targetUrl"]));
-  await prisma.keyword.create({ data });
+  const keyword = await prisma.keyword.create({ data });
+  await auditAction("keyword.created", actor, "keyword", keyword.id, { projectId: data.projectId });
 
   revalidatePath(`/projects/${data.projectId}`);
 }
 
 export async function createKeywords(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = bulkKeywordSchema.parse(readForm(formData, ["projectId", "phrases", "group", "targetUrl"]));
   const phrases = uniqueLines(data.phrases);
 
@@ -178,18 +223,20 @@ export async function createKeywords(formData: FormData) {
       targetUrl: data.targetUrl
     }))
   });
+  await auditAction("keyword.bulk_created", actor, "project", data.projectId, { count: phrases.length });
 
   revalidatePath(`/projects/${data.projectId}`);
 }
 
 export async function updateKeywordActive(keywordId: string, projectId: string, active: boolean) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   await prisma.keyword.update({ where: { id: keywordId }, data: { active } });
+  await auditAction("keyword.status_changed", actor, "keyword", keywordId, { projectId, active });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function createLocation(formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = locationSchema.parse(readForm(formData, ["projectId", "countryCode", "dataForSeoLocationName"]));
   const supportedAreas = await new DataForSeoClient().getGoogleLocations(data.countryCode);
   const area = supportedAreas.find((location) => location.locationName === data.dataForSeoLocationName);
@@ -208,12 +255,13 @@ export async function createLocation(formData: FormData) {
   if (existing) {
     if (!existing.active) {
       await prisma.location.update({ where: { id: existing.id }, data: { active: true } });
+      await auditAction("location.status_changed", actor, "location", existing.id, { projectId: data.projectId, active: true });
     }
     revalidatePath(`/projects/${data.projectId}`);
     return;
   }
 
-  await prisma.location.create({
+  const location = await prisma.location.create({
     data: {
       projectId: data.projectId,
       name: area.locationName.split(",")[0],
@@ -221,17 +269,19 @@ export async function createLocation(formData: FormData) {
       dataForSeoLocationName: area.locationName
     }
   });
+  await auditAction("location.created", actor, "location", location.id, { projectId: data.projectId });
   revalidatePath(`/projects/${data.projectId}`);
 }
 
 export async function updateLocationActive(locationId: string, projectId: string, active: boolean) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   await prisma.location.update({ where: { id: locationId }, data: { active } });
+  await auditAction("location.status_changed", actor, "location", locationId, { projectId, active });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function runSandboxCheck(projectId: string, formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   let runId: string;
 
   try {
@@ -243,8 +293,10 @@ export async function runSandboxCheck(projectId: string, formData: FormData) {
       searchTypes: stringListFromForm(formData, "searchTypes")
     });
     runId = await executeSandboxRankRun(selection);
+    await auditAction("report.sandbox_run", actor, "rankRun", runId, { projectId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the sandbox check.";
+    await auditAction("report.sandbox_run", actor, "project", projectId, { error: message }, "failure");
     redirect(`/projects/${projectId}?sandboxError=${encodeURIComponent(message)}`);
   }
 
@@ -258,7 +310,7 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
   let runId: string;
 
   try {
-    const actor = await requireAdmin();
+    const actor = await guardedAdminAction("paid", paidRunRateLimit());
     const selection = liveRunSchema.parse({
       projectId,
       keywordId: stringFromForm(formData.get("keywordId")),
@@ -276,8 +328,11 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
       searchTypes: [selection.searchType],
       pageLimit: selection.pageLimit
     }, actor.email);
+    await auditAction("report.live_queued", actor, "rankRun", runId, { projectId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the live verification.";
+    const actor = await currentActor();
+    await auditAction("report.live_queued", actor, "project", projectId, { error: message }, "failure");
     redirect(`/projects/${projectId}?liveError=${encodeURIComponent(message)}`);
   }
 
@@ -288,7 +343,7 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
 }
 
 export async function updateProjectSchedule(projectId: string, formData: FormData) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("mutation", actionRateLimit());
   const data = scheduleSchema.parse({
     scheduleEnabled: formData.get("scheduleEnabled") === "on",
     scheduleDay: stringFromForm(formData.get("scheduleDay")),
@@ -297,17 +352,26 @@ export async function updateProjectSchedule(projectId: string, formData: FormDat
     schedulePageLimit: stringFromForm(formData.get("schedulePageLimit"))
   });
   await prisma.project.update({ where: { id: projectId }, data });
+  await auditAction("project.schedule_updated", actor, "project", projectId, {
+    enabled: data.scheduleEnabled,
+    day: data.scheduleDay,
+    devices: data.scheduleDevices,
+    searchTypes: data.scheduleSearchTypes
+  });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function queueProjectRerun(clientId: string, formData: FormData) {
   let runId: string;
   try {
-    const actor = await currentActor();
+    const actor = await guardedActorAction("paid", paidRunRateLimit());
     const projectId = stringFromForm(formData.get("projectId"));
     runId = await enqueueProjectRerun({ projectId, requestedByEmail: actor.email, role: actor.role });
+    await auditAction("report.rerun_queued", actor, "rankRun", runId, { projectId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to queue the report.";
+    const actor = await currentActor();
+    await auditAction("report.rerun_queued", actor, "client", clientId, { error: message }, "failure");
     redirect(`/clients/${clientId}?queueError=${encodeURIComponent(message)}`);
   }
 
@@ -317,18 +381,21 @@ export async function queueProjectRerun(clientId: string, formData: FormData) {
 }
 
 export async function retryFailedRankRun(runId: string) {
-  const actor = await requireAdmin();
+  const actor = await guardedAdminAction("paid", paidRunRateLimit());
   const newRunId = await retryRankRun(runId, actor.email);
+  await auditAction("report.retry_queued", actor, "rankRun", newRunId, { originalRunId: runId });
   revalidatePath("/runs");
   redirect(`/runs/${newRunId}`);
 }
 
 export async function queueKeywordMetrics(projectId: string) {
-  await requireAdmin();
+  const actor = await guardedAdminAction("paid", paidRunRateLimit());
   try {
     await enqueueKeywordMetrics(projectId);
+    await auditAction("keyword_metrics.queued", actor, "project", projectId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to queue keyword metrics.";
+    await auditAction("keyword_metrics.queued", actor, "project", projectId, { error: message }, "failure");
     redirect(`/projects/${projectId}?metricsError=${encodeURIComponent(message)}`);
   }
   revalidatePath(`/projects/${projectId}`);
@@ -360,4 +427,41 @@ function uniqueLines(value: string) {
         .filter(Boolean)
     )
   );
+}
+
+async function guardedAdminAction(scope: string, policy: RateLimitPolicy) {
+  const actor = await requireAdmin();
+  await enforceRateLimit(scope, actor.email, policy);
+  return actor;
+}
+
+async function guardedActorAction(scope: string, policy: RateLimitPolicy) {
+  const actor = await currentActor();
+  await enforceRateLimit(scope, actor.email, policy);
+  return actor;
+}
+
+async function auditAction(
+  event: string,
+  actor: CurrentActor,
+  entityType: string,
+  entityId: string | null,
+  metadata?: Record<string, string | number | boolean | string[]>,
+  outcome: "success" | "failure" = "success"
+) {
+  await writeRequestAudit({
+    event,
+    outcome,
+    actorEmail: actor.email,
+    actorRole: actor.role,
+    entityType,
+    entityId,
+    ...(metadata ? { metadata } : {})
+  });
+}
+
+function shareExpiry(formData?: FormData) {
+  const parsed = Number.parseInt(stringFromForm(formData?.get("shareExpiryDays") ?? null), 10);
+  const days = [7, 30, 90, 365].includes(parsed) ? parsed : 30;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }

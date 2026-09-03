@@ -3,6 +3,7 @@ import { Device, Prisma, RankRunSource, SearchType } from "@prisma/client";
 import { z } from "zod";
 import type { AppRole } from "../../auth";
 import { DataForSeoClient } from "@/lib/dataforseo";
+import { writeAuditLog } from "@/lib/audit";
 import { assertBudgetAvailable, estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { executeQueuedRankRun, type RankRunSelection } from "@/lib/rank-runner";
@@ -138,10 +139,18 @@ export async function enqueueDueSchedules(now = new Date()) {
     }, "standard");
 
     try {
-      await enqueueSelection(selection, "scheduled", "scheduler");
+      const runId = await enqueueSelection(selection, "scheduled", "scheduler");
+      await writeAuditLog({
+        event: "report.scheduled_queued",
+        actorEmail: "scheduler",
+        actorRole: "system",
+        entityType: "rankRun",
+        entityId: runId,
+        metadata: { projectId: project.id, requestedTasks }
+      });
       queued += 1;
     } catch (error) {
-      await prisma.rankRun.create({
+      const blocked = await prisma.rankRun.create({
         data: {
           projectId: project.id,
           status: "blocked",
@@ -155,6 +164,15 @@ export async function enqueueDueSchedules(now = new Date()) {
           lastError: errorMessage(error),
           notes: `Monthly schedule blocked: ${errorMessage(error)}`
         }
+      });
+      await writeAuditLog({
+        event: "report.scheduled_blocked",
+        outcome: "failure",
+        actorEmail: "scheduler",
+        actorRole: "system",
+        entityType: "rankRun",
+        entityId: blocked.id,
+        metadata: { projectId: project.id, error: errorMessage(error) }
       });
     }
   }
@@ -186,8 +204,22 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
         const selection = queueSelectionSchema.parse(candidate.selection);
         if (candidate.source === "verification") {
           await executeQueuedRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
+          await writeAuditLog({
+            event: "report.run_completed",
+            actorEmail: "system",
+            actorRole: "system",
+            entityType: "rankRun",
+            entityId: candidate.id
+          });
         } else {
           await submitStandardRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
+          await writeAuditLog({
+            event: "report.run_submitted",
+            actorEmail: "system",
+            actorRole: "system",
+            entityType: "rankRun",
+            entityId: candidate.id
+          });
         }
       } catch (error) {
         await prisma.rankRun.update({
@@ -198,6 +230,15 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
             lastError: errorMessage(error),
             notes: `${candidate.notes ?? "Queued report."} Failed: ${errorMessage(error)}`
           }
+        });
+        await writeAuditLog({
+          event: "report.run_failed",
+          outcome: "failure",
+          actorEmail: "system",
+          actorRole: "system",
+          entityType: "rankRun",
+          entityId: candidate.id,
+          metadata: { error: errorMessage(error) }
         });
       }
       processed += 1;

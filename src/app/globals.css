@@ -2062,6 +2062,44 @@ button.status:hover {
   align-items: center;
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.share-expiry {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.share-renew-form {
+  align-items: end;
+  display: flex;
+  gap: 7px;
+}
+
+.share-expiry-select {
+  color: var(--muted);
+  display: grid;
+  font-size: 9px;
+  font-weight: 500;
+  gap: 3px;
+  text-transform: uppercase;
+}
+
+.share-expiry-select select {
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 12px) 15px / 4px 4px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 8px) 15px / 4px 4px no-repeat,
+    var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  min-height: 36px;
+  padding: 7px 26px 7px 9px;
 }
 
 .share-link-field {
@@ -2116,6 +2154,54 @@ button.status:hover {
 .shared-brand span {
   font-size: 16px;
   font-weight: 500;
+}
+
+.shared-access-status {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 10px;
+  gap: 9px;
+}
+
+.audit-table {
+  min-width: 760px;
+}
+
+.audit-table td,
+.audit-table th {
+  font-size: 10px;
+  padding-bottom: 8px;
+  padding-top: 8px;
+}
+
+.audit-outcome {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.audit-outcome.success {
+  color: var(--good);
+}
+
+.audit-outcome.failure {
+  color: var(--danger);
+}
+
+.operations-alert {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.operations-alert a {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .shared-client-header h1 {
@@ -2621,6 +2707,16 @@ button.status:hover {
   .share-controls {
     align-items: stretch;
     display: grid;
+  }
+
+  .share-renew-form,
+  .operations-alert {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .operations-alert a {
+    margin-left: 0;
   }
 
   .share-link-field input {

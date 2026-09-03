@@ -4,6 +4,7 @@ import {
   createProject,
   disableClientShare,
   enableClientShare,
+  regenerateClientShare,
   queueProjectRerun,
   updateClient
 } from "@/app/actions";
@@ -43,11 +44,18 @@ export default async function ClientDetailPage({ params, searchParams }: {
   });
 
   if (!client) notFound();
+  const shareActive = Boolean(
+    client.shareEnabled &&
+    client.shareToken &&
+    client.shareExpiresAt &&
+    client.shareExpiresAt > new Date()
+  );
 
   if (settingsOpen) {
     const updateClientWithId = updateClient.bind(null, client.id);
     const enableShareWithId = enableClientShare.bind(null, client.id);
     const disableShareWithId = disableClientShare.bind(null, client.id);
+    const regenerateShareWithId = regenerateClientShare.bind(null, client.id);
 
     return (
       <>
@@ -78,15 +86,21 @@ export default async function ClientDetailPage({ params, searchParams }: {
               <h3>Read-only report link</h3>
               <p className="muted">Anyone with this private link can view the client report. They cannot edit settings or run checks.</p>
             </div>
-            {client.shareEnabled && client.shareToken ? (
+            {shareActive && client.shareToken && client.shareExpiresAt ? (
               <div className="share-controls">
                 <CopyShareLink path={`/share/${client.shareToken}`} />
+                <span className="share-expiry">Expires {client.shareExpiresAt.toLocaleDateString("en-GB")}</span>
+                <form className="share-renew-form" action={regenerateShareWithId}>
+                  <ShareExpirySelect />
+                  <button className="button button-secondary" type="submit">Regenerate</button>
+                </form>
                 <form action={disableShareWithId}>
                   <button className="button button-secondary" type="submit">Revoke Link</button>
                 </form>
               </div>
             ) : (
-              <form action={enableShareWithId}>
+              <form className="share-renew-form" action={enableShareWithId}>
+                <ShareExpirySelect />
                 <button className="button" type="submit">Create Read-only Link</button>
               </form>
             )}
@@ -141,12 +155,26 @@ export default async function ClientDetailPage({ params, searchParams }: {
           }, "standard")
         }))}
         role={actor.role}
-        shareEnabled={client.shareEnabled}
+        shareEnabled={shareActive}
         shareToken={client.shareToken}
       />
       {resolvedSearchParams.queueError ? <div className="notice danger-notice"><strong>Report not queued.</strong> {resolvedSearchParams.queueError}</div> : null}
       <ClientReportDashboard data={reportData} basePath={`/clients/${client.id}`} />
     </>
+  );
+}
+
+function ShareExpirySelect() {
+  return (
+    <label className="share-expiry-select">
+      Link lifetime
+      <select name="shareExpiryDays" defaultValue="30">
+        <option value="7">7 days</option>
+        <option value="30">30 days</option>
+        <option value="90">90 days</option>
+        <option value="365">1 year</option>
+      </select>
+    </label>
   );
 }
 
