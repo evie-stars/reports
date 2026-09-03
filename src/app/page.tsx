@@ -1,12 +1,17 @@
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
+import { Icon } from "@/components/icon";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  await currentActor();
+  const actor = await currentActor();
   const data = await getDashboardData();
+  const dataForSeoConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const liveApiEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
+  const googleSignInEnabled = process.env.AUTH_ENABLED === "true";
+
   return (
     <>
       <header className="page-header">
@@ -14,12 +19,45 @@ export default async function DashboardPage() {
           <h2>Dashboard</h2>
           <p>A quick view of reporting activity across all clients.</p>
         </div>
-        <Link className="button" href="/clients">View Clients</Link>
       </header>
 
       {data.dbUnavailable ? <SetupNotice /> : null}
 
-      <section className="summary-strip" aria-label="Reporting summary">
+      <div className="dashboard-command-grid">
+        <section className="dashboard-actions" aria-labelledby="quick-actions-title">
+          <div className="dashboard-section-heading">
+            <p className="label" id="quick-actions-title">Quick Actions</p>
+          </div>
+          <div className="quick-action-grid">
+            {actor.role === "admin" ? (
+              <Link className="quick-action" href="/clients?new=1">
+                <span className="quick-action-icon"><Icon name="contacts" /></span>
+                <span><strong>Add Client</strong><small>Create a new client record</small></span>
+              </Link>
+            ) : null}
+            <Link className="quick-action" href="/clients">
+              <span className="quick-action-icon"><Icon name="edit" /></span>
+              <span><strong>Add Report</strong><small>Choose a client to continue</small></span>
+            </Link>
+          </div>
+        </section>
+
+        <section className="card configuration-feed" aria-labelledby="configuration-title">
+          <div className="dashboard-section-heading">
+            <p className="label label-with-icon" id="configuration-title"><Icon name="settings" />Configuration Status</p>
+            <Link href="/settings">View settings</Link>
+          </div>
+          <div className="configuration-grid">
+            <ConfigurationItem label="DataForSEO" value={dataForSeoConfigured ? "Connected" : "Credentials missing"} good={dataForSeoConfigured} />
+            <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
+            <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
+            <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
+            <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
+          </div>
+        </section>
+      </div>
+
+      <section className="summary-strip spaced-section" aria-label="Reporting summary">
         <SummaryItem label="Clients" value={data.clients} />
         <SummaryItem label="Reports" value={data.projects} />
         <SummaryItem label="Active Keywords" value={data.keywords} />
@@ -60,11 +98,13 @@ export default async function DashboardPage() {
 
 async function getDashboardData() {
   try {
-    const [clients, projects, keywords, locations, runs] = await Promise.all([
+    const [clients, projects, keywords, locations, schedules, queuedRuns, runs] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
       prisma.location.count({ where: { active: true } }),
+      prisma.project.count({ where: { scheduleEnabled: true } }),
+      prisma.rankRun.count({ where: { status: { in: ["queued", "running"] } } }),
       prisma.rankRun.findMany({
         orderBy: { createdAt: "desc" },
         take: 5,
@@ -72,9 +112,9 @@ async function getDashboardData() {
       })
     ]);
 
-    return { clients, projects, keywords, locations, runs, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, runs, dbUnavailable: false };
   } catch {
-    return { clients: 0, projects: 0, keywords: 0, locations: 0, runs: [], dbUnavailable: true };
+    return { clients: 0, projects: 0, keywords: 0, locations: 0, schedules: 0, queuedRuns: 0, runs: [], dbUnavailable: true };
   }
 }
 
@@ -89,4 +129,23 @@ function SetupNotice() {
 
 function SummaryItem({ label, value }: { label: string; value: number }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function ConfigurationItem({
+  label,
+  value,
+  good,
+  neutral = false
+}: {
+  label: string;
+  value: string;
+  good: boolean;
+  neutral?: boolean;
+}) {
+  return (
+    <div className="configuration-item">
+      <span className={`configuration-dot ${neutral ? "neutral" : good ? "good" : "warning"}`} aria-hidden="true" />
+      <span><strong>{label}</strong><small>{value}</small></span>
+    </div>
+  );
 }

@@ -15,6 +15,7 @@ export function AppShell({
   appRole?: "admin" | "sales";
 }) {
   const pathname = usePathname();
+  const breadcrumbs = getBreadcrumbs(pathname);
 
   if (pathname.startsWith("/share/") || pathname === "/login") {
     return <main className="shared-main">{children}</main>;
@@ -43,7 +44,14 @@ export function AppShell({
       </aside>
       <main>
         <div className="topbar">
-          <span>reports.starwebsites.co.uk</span>
+          <nav className="topbar-breadcrumbs" aria-label="Breadcrumb">
+            {breadcrumbs.map((breadcrumb, index) => (
+              <span key={`${breadcrumb.label}-${index}`}>
+                {index > 0 ? <span className="breadcrumb-separator" aria-hidden="true">/</span> : null}
+                {breadcrumb.href ? <Link href={breadcrumb.href}>{breadcrumb.label}</Link> : <span aria-current="page">{breadcrumb.label}</span>}
+              </span>
+            ))}
+          </nav>
           <div className="topbar-actions">
             <span className="status good">API guardrails active</span>
             {accountControl}
@@ -53,6 +61,17 @@ export function AppShell({
       </main>
     </div>
   );
+}
+
+function getBreadcrumbs(pathname: string) {
+  if (pathname === "/") return [{ label: "Dashboard" }];
+  if (pathname === "/clients") return [{ label: "Clients" }];
+  if (pathname.startsWith("/clients/")) return [{ label: "Clients", href: "/clients" }, { label: "Client report" }];
+  if (pathname.startsWith("/projects/")) return [{ label: "Clients", href: "/clients" }, { label: "Edit report" }];
+  if (pathname === "/runs") return [{ label: "Rank Runs" }];
+  if (pathname.startsWith("/runs/")) return [{ label: "Rank Runs", href: "/runs" }, { label: "Run details" }];
+  if (pathname === "/settings") return [{ label: "Settings" }];
+  return [{ label: "Report Hub" }];
 }
 
 function NavigationLink({
