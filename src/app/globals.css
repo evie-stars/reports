@@ -837,7 +837,7 @@ button.status:hover {
 
 .matrix-result-heading {
   min-width: 78px;
-  text-align: center !important;
+  text-align: left !important;
 }
 
 .matrix-result-heading span,
@@ -859,14 +859,15 @@ button.status:hover {
 }
 
 .matrix-result-cell {
-  text-align: center !important;
+  text-align: left !important;
 }
 
 .matrix-result {
   align-items: center;
-  display: inline-flex;
+  display: flex;
   gap: 4px;
-  justify-content: center;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .matrix-position {
@@ -909,22 +910,18 @@ button.status:hover {
 }
 
 .matrix-movement {
-  border-radius: 999px;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
-  padding: 3px 5px;
   white-space: nowrap;
 }
 
 .matrix-movement.up,
 .matrix-movement.new {
-  background: #e0f2e9;
   color: #287a50;
 }
 
 .matrix-movement.down {
-  background: #fde8e6;
   color: #b92e27;
 }
 
@@ -1428,32 +1425,32 @@ button.status:hover {
 
 .position-chart-legend .first::before,
 .position-bar.first {
-  background: var(--dark-blue);
-  fill: var(--dark-blue);
+  background: #287a50;
+  fill: #287a50;
 }
 
 .position-chart-legend .two-three::before,
 .position-bar.two-three {
-  background: var(--light-blue);
-  fill: var(--light-blue);
-}
-
-.position-chart-legend .four-ten::before,
-.position-bar.four-ten {
   background: var(--green);
   fill: var(--green);
 }
 
+.position-chart-legend .four-ten::before,
+.position-bar.four-ten {
+  background: #8fc9aa;
+  fill: #8fc9aa;
+}
+
 .position-chart-legend .eleven-twenty::before,
 .position-bar.eleven-twenty {
-  background: #9bcfba;
-  fill: #9bcfba;
+  background: #e5a23d;
+  fill: #e5a23d;
 }
 
 .position-chart-legend .beyond-twenty::before,
 .position-bar.beyond-twenty {
-  background: #dfe5ea;
-  fill: #dfe5ea;
+  background: #d9693c;
+  fill: #d9693c;
 }
 
 .position-bar {
