@@ -30,12 +30,12 @@ export default async function DashboardPage() {
           </div>
           <div className="quick-action-grid">
             {actor.role === "admin" ? (
-              <Link className="quick-action" href="/clients?new=1">
+              <Link className="quick-action quick-action-client" href="/clients?new=1">
                 <span className="quick-action-icon"><Icon name="contacts" /></span>
                 <span><strong>Add Client</strong><small>Create a new client record</small></span>
               </Link>
             ) : null}
-            <Link className="quick-action" href="/clients">
+            <Link className="quick-action quick-action-report" href="/clients">
               <span className="quick-action-icon"><Icon name="edit" /></span>
               <span><strong>Add Report</strong><small>Choose a client to continue</small></span>
             </Link>
