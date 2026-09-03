@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Icon } from "@/components/icon";
-import { buildRankMatrix, RankMatrix, type RankMatrixResult } from "@/components/rank-matrix";
+import { buildRankMatrix, RankMatrix, RankMatrixRank, type RankMatrixResult } from "@/components/rank-matrix";
 import type { ClientReportData, CurrentReportResult } from "@/lib/client-report";
 
 export function ClientReportDashboard({
@@ -242,7 +242,22 @@ function KeywordDrawer({
   searchVolume: number | null;
   monthlySearches: unknown;
 }) {
-  const chartHistory = [...history].reverse().filter((item) => item.rank !== null);
+  const matrixHistory: RankMatrixResult[] = history.map((item) => ({
+    id: item.id,
+    projectId: item.runId,
+    projectName: item.projectName,
+    keywordId: "history",
+    keyword,
+    locationId: `${item.projectId}:${item.locationName}`,
+    location: item.locationName,
+    searchType: item.searchType,
+    device: item.device,
+    rank: item.rank,
+    previousRank: item.previousRank,
+    direction: item.direction,
+    matchedUrl: item.matchedUrl,
+    checkedAt: item.checkedAt
+  }));
   const volumeTrend = readVolumeTrend(monthlySearches);
   return (
     <div className="report-drawer-layer">
@@ -257,22 +272,8 @@ function KeywordDrawer({
           <div><span>Average monthly searches</span><strong>{searchVolume?.toLocaleString("en-GB") ?? "-"}</strong></div>
           <VolumeTrend points={volumeTrend} />
         </div>
-        <RankHistoryChart history={chartHistory} />
-        <div className="table-scroll drawer-history-table">
-          <table className="table">
-            <thead><tr><th>Date</th><th>Area</th><th>Rank</th><th>URL</th></tr></thead>
-            <tbody>
-              {history.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.checkedAt.toLocaleDateString("en-GB")}</td>
-                  <td>{item.locationName}<small className="row-context">{readableType(item.device)} · {readableType(item.searchType)}</small></td>
-                  <td><strong>{item.rank ?? "-"}</strong></td>
-                  <td>{item.matchedUrl ? <a className="drawer-url" href={item.matchedUrl} target="_blank" rel="noreferrer">{shortUrl(item.matchedUrl)}</a> : "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <RankHistoryChart history={matrixHistory} />
+        <KeywordHistoryMatrix history={matrixHistory} />
       </aside>
     </div>
   );
@@ -304,25 +305,97 @@ function readVolumeTrend(value: unknown) {
   }).slice(-12);
 }
 
-function RankHistoryChart({ history }: { history: ClientReportData["keywordHistory"] }) {
-  if (history.length < 2) return <div className="chart-empty compact">More history is needed for this keyword chart.</div>;
+function KeywordHistoryMatrix({ history }: { history: RankMatrixResult[] }) {
+  const { columns, rows } = buildRankMatrix(history);
+  return (
+    <div className="table-scroll drawer-history-table">
+      <table className="table history-matrix-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Area</th>
+            {columns.map((column) => (
+              <th className="matrix-result-heading" key={column.key}>
+                <span>{readableType(column.searchType)}</span>
+                <small>{readableType(column.device)}</small>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="matrix-date-cell">{row.checkedAt?.toLocaleDateString("en-GB") ?? "-"}</td>
+              <td>{row.location}</td>
+              {columns.map((column) => (
+                <td className="matrix-result-cell" key={column.key}>
+                  {row.cells[column.key] ? <RankMatrixRank result={row.cells[column.key]} /> : <span className="matrix-empty-cell">-</span>}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {rows.length === 0 ? <tr><td className="empty-table" colSpan={columns.length + 2}>No ranking history stored yet.</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RankHistoryChart({ history }: { history: RankMatrixResult[] }) {
+  const rankedResults = history.filter((item) => item.rank !== null && item.checkedAt);
+  const runDates = Array.from(
+    new Map(history.filter((item) => item.checkedAt).map((item) => [item.projectId, item.checkedAt as Date])).entries()
+  ).sort((left, right) => left[1].getTime() - right[1].getTime());
+  if (rankedResults.length < 2 || runDates.length < 2) {
+    return <div className="chart-empty compact">More history is needed for this keyword chart.</div>;
+  }
+
+  const { columns } = buildRankMatrix(history);
+  const runIndexes = new Map(runDates.map(([runId], index) => [runId, index]));
+  const series = columns.map((column, index) => ({
+    ...column,
+    index,
+    points: rankedResults
+      .filter((item) => `${item.searchType}:${item.device}` === column.key)
+      .sort((left, right) => (left.checkedAt as Date).getTime() - (right.checkedAt as Date).getTime())
+  })).filter((item) => item.points.length > 0);
   const width = 560;
   const height = 190;
-  const padding = 28;
-  const ranks = history.map((item) => item.rank).filter((rank): rank is number => rank !== null);
+  const padding = { top: 24, right: 20, bottom: 30, left: 28 };
+  const ranks = rankedResults.map((item) => item.rank as number);
   const maxRank = Math.max(10, ...ranks);
-  const x = (index: number) => padding + index * ((width - padding * 2) / (history.length - 1));
-  const y = (rank: number) => padding + (rank - 1) * ((height - padding * 2) / Math.max(1, maxRank - 1));
-  const path = history.map((item, index) => `${index ? "L" : "M"}${x(index)},${y(item.rank ?? maxRank)}`).join(" ");
+  const x = (runId: string) => padding.left + (runIndexes.get(runId) ?? 0) * ((width - padding.left - padding.right) / Math.max(1, runDates.length - 1));
+  const y = (rank: number) => padding.top + (rank - 1) * ((height - padding.top - padding.bottom) / Math.max(1, maxRank - 1));
   return (
-    <svg className="keyword-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Keyword rank history where a lower position is better">
-      <line x1={padding} x2={width - padding} y1={y(1)} y2={y(1)} className="chart-grid-line" />
-      <line x1={padding} x2={width - padding} y1={y(Math.min(10, maxRank))} y2={y(Math.min(10, maxRank))} className="chart-grid-line" />
-      <text x="4" y={y(1) + 4} className="chart-axis-label">1</text>
-      <text x="4" y={y(Math.min(10, maxRank)) + 4} className="chart-axis-label">{Math.min(10, maxRank)}</text>
-      <path d={path} className="chart-line page-one" />
-      {history.map((item, index) => <circle key={item.id} cx={x(index)} cy={y(item.rank ?? maxRank)} r="4" className="chart-point page-one"><title>{item.checkedAt.toLocaleDateString("en-GB")}: position {item.rank}</title></circle>)}
-    </svg>
+    <div className="keyword-history-chart">
+      <div className="history-chart-legend">
+        {series.map((item) => <span className={`history-series-${item.index}`} key={item.key}>{readableType(item.searchType)} · {readableType(item.device)}</span>)}
+      </div>
+      <svg className="keyword-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Keyword rank history split by result type and device; a lower position is better">
+        <line x1={padding.left} x2={width - padding.right} y1={y(1)} y2={y(1)} className="chart-grid-line" />
+        <line x1={padding.left} x2={width - padding.right} y1={y(Math.min(10, maxRank))} y2={y(Math.min(10, maxRank))} className="chart-grid-line" />
+        <text x="4" y={y(1) + 4} className="chart-axis-label">1</text>
+        <text x="4" y={y(Math.min(10, maxRank)) + 4} className="chart-axis-label">{Math.min(10, maxRank)}</text>
+        {series.map((item) => {
+          const path = item.points.map((point, index) => `${index ? "L" : "M"}${x(point.projectId)},${y(point.rank as number)}`).join(" ");
+          return (
+            <g key={item.key}>
+              {item.points.length > 1 ? <path d={path} className={`chart-line history-series-${item.index}`} /> : null}
+              {item.points.map((point) => (
+                <circle key={point.id} cx={x(point.projectId)} cy={y(point.rank as number)} r="4" className={`chart-point history-series-${item.index}`}>
+                  <title>{point.checkedAt?.toLocaleDateString("en-GB")}: {readableType(point.searchType)} {readableType(point.device)} position {point.rank}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+        {runDates.map(([runId, date], index) => index === 0 || index === runDates.length - 1 ? (
+          <text key={runId} x={x(runId)} y={height - 7} textAnchor={index === 0 ? "start" : "end"} className="chart-axis-label">
+            {date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+          </text>
+        ) : null)}
+      </svg>
+    </div>
   );
 }
 
@@ -343,13 +416,4 @@ function reportHref(basePath: string, filters: ClientReportData["filters"], keyw
 
 function readableType(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function shortUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.pathname === "/" ? url.hostname : url.pathname;
-  } catch {
-    return value;
-  }
 }

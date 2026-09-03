@@ -119,7 +119,7 @@ export function RankMatrix({
               {showVolume ? <td>{row.searchVolume?.toLocaleString("en-GB") ?? "-"}</td> : null}
               {columns.map((column) => (
                 <td className="matrix-result-cell" key={column.key}>
-                  {row.cells[column.key] ? <RankCell result={row.cells[column.key]} /> : <span className="matrix-empty-cell">-</span>}
+                  {row.cells[column.key] ? <RankMatrixRank result={row.cells[column.key]} /> : <span className="matrix-empty-cell">-</span>}
                 </td>
               ))}
               {showChecked ? <td className="matrix-date-cell">{row.checkedAt?.toLocaleDateString("en-GB") ?? "-"}</td> : null}
@@ -134,7 +134,7 @@ export function RankMatrix({
   );
 }
 
-function RankCell({ result }: { result: RankMatrixResult }) {
+export function RankMatrixRank({ result }: { result: RankMatrixResult }) {
   const state = movementState(result.direction);
   const movement = movementLabel(result);
   const title = cellTitle(result);

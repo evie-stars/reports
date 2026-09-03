@@ -92,6 +92,8 @@ export async function getClientReportData(clientId: string, searchParams: Report
         .slice(0, 40)
         .map((result) => ({
           id: result.id,
+          runId: result.runId,
+          projectId: result.run.projectId,
           checkedAt: result.checkedAt,
           rank: result.rankAbsolute ?? result.rankGroup,
           previousRank: result.previousRank,

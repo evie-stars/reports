@@ -1707,12 +1707,88 @@ button.status:hover {
 }
 
 .keyword-chart {
-  margin: 18px 0;
   max-height: 230px;
 }
 
 .drawer-history-table {
-  margin-top: 8px;
+  margin-top: 12px;
+}
+
+.history-matrix-table {
+  font-size: 10px;
+  min-width: 540px;
+}
+
+.history-matrix-table th,
+.history-matrix-table td {
+  padding: 6px;
+}
+
+.history-matrix-table th {
+  font-size: 9px;
+}
+
+.history-matrix-table .matrix-date-cell {
+  min-width: 72px;
+}
+
+.keyword-history-chart {
+  margin: 16px 0 4px;
+}
+
+.history-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 9px;
+  font-weight: 600;
+  gap: 7px 14px;
+  justify-content: flex-end;
+  margin-bottom: 3px;
+}
+
+.history-chart-legend span::before {
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 7px;
+  margin-right: 5px;
+  width: 7px;
+}
+
+.chart-line.history-series-0,
+.chart-point.history-series-0 {
+  stroke: var(--light-blue);
+}
+
+.chart-line.history-series-1,
+.chart-point.history-series-1 {
+  stroke: var(--green);
+}
+
+.chart-line.history-series-2,
+.chart-point.history-series-2 {
+  stroke: var(--dark-blue);
+}
+
+.chart-line.history-series-3,
+.chart-point.history-series-3 {
+  stroke: #d69020;
+}
+
+.history-chart-legend .history-series-0::before {
+  background: var(--light-blue);
+}
+
+.history-chart-legend .history-series-1::before {
+  background: var(--green);
+}
+
+.history-chart-legend .history-series-2::before {
+  background: var(--dark-blue);
+}
+
+.history-chart-legend .history-series-3::before {
+  background: #d69020;
 }
 
 .drawer-url {
