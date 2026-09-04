@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createLocation } from "@/app/actions";
+import { createLocation } from "@/actions/projects";
 import { Icon } from "@/components/icon";
+import { StatusPill } from "@/components/ui/status-pill";
 
 type Area = {
   locationCode: number;
@@ -11,12 +12,20 @@ type Area = {
   locationType: string;
 };
 
+const LIST_ID = "area-options";
+
+function optionId(area: Area) {
+  return `area-option-${area.locationCode}`;
+}
+
 export function AreaPickerForm({ projectId }: { projectId: string }) {
   const [areas, setAreas] = useState<Area[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Area | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState(-1);
+  const [listOpen, setListOpen] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -57,61 +66,133 @@ export function AreaPickerForm({ projectId }: { projectId: string }) {
       .slice(0, 10);
   }, [areas, query, selected]);
 
+  const showList = listOpen && matches.length > 0;
+  const highlightedArea = showList && highlighted >= 0 ? matches[highlighted] : undefined;
+
+  useEffect(() => {
+    if (!highlightedArea) return;
+    document.getElementById(optionId(highlightedArea))?.scrollIntoView({ block: "nearest" });
+  }, [highlightedArea]);
+
+  function choose(area: Area) {
+    setSelected(area);
+    setQuery(area.locationName);
+    setHighlighted(-1);
+    setListOpen(false);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      if (matches.length === 0) return;
+      event.preventDefault();
+      setListOpen(true);
+      setHighlighted((index) => (index + 1 >= matches.length ? 0 : index + 1));
+    } else if (event.key === "ArrowUp") {
+      if (matches.length === 0) return;
+      event.preventDefault();
+      setListOpen(true);
+      setHighlighted((index) => (index <= 0 ? matches.length - 1 : index - 1));
+    } else if (event.key === "Enter") {
+      if (!showList) return;
+      event.preventDefault();
+      if (highlightedArea) choose(highlightedArea);
+    } else if (event.key === "Escape") {
+      if (!showList) return;
+      event.preventDefault();
+      setListOpen(false);
+      setHighlighted(-1);
+    }
+  }
+
   return (
-    <form className="card form area-form" action={createLocation}>
-      <p className="label label-with-icon"><Icon name="location" />Add Area</p>
+    <form className="card flex flex-col" action={createLocation}>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-base flex items-center gap-2">
+            <Icon name="map-pin" className="w-4 h-4 text-slate shrink-0" />
+            <span className="truncate">Add area</span>
+          </h2>
+          <p className="text-xs text-slate mt-0.5">Only exact areas supplied by DataForSEO can be added.</p>
+        </div>
+      </div>
+
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="countryCode" value="GB" />
       <input type="hidden" name="dataForSeoLocationName" value={selected?.locationName ?? ""} />
 
-      <label>
-        Search United Kingdom areas
-        <div className="search-field">
-          <Icon name="search" />
-          <input
-            aria-autocomplete="list"
-            aria-controls="area-options"
-            aria-expanded={matches.length > 0}
-            autoComplete="off"
-            disabled={loading || Boolean(error)}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setSelected(null);
-            }}
-            placeholder={loading ? "Loading DataForSEO areas..." : "Start typing Manchester, Chester..."}
-            role="combobox"
-            value={query}
-          />
-        </div>
-      </label>
-
-      {matches.length > 0 ? (
-        <div className="area-results" id="area-options" role="listbox" aria-label="Supported DataForSEO areas">
-          {matches.map((area) => (
-            <button
-              key={area.locationCode}
-              onClick={() => {
-                setSelected(area);
-                setQuery(area.locationName);
+      <div className="flex-1 space-y-3">
+        <label className="block">
+          <span className="field-label">Search United Kingdom areas</span>
+          <span className="relative block">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate pointer-events-none">
+              <Icon name="search" className="w-4 h-4" />
+            </span>
+            <input
+              aria-activedescendant={highlightedArea ? optionId(highlightedArea) : undefined}
+              aria-autocomplete="list"
+              aria-controls={LIST_ID}
+              aria-expanded={showList}
+              autoComplete="off"
+              className="field pl-9"
+              disabled={loading || Boolean(error)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSelected(null);
+                setHighlighted(-1);
+                setListOpen(true);
               }}
-              aria-selected={selected?.locationCode === area.locationCode}
-              role="option"
-              type="button"
-            >
-              <span>{area.locationName}</span>
-              <small>{area.locationType}</small>
-            </button>
-          ))}
-        </div>
-      ) : null}
+              onKeyDown={handleKeyDown}
+              placeholder={loading ? "Loading DataForSEO areas…" : "Start typing Manchester, Chester…"}
+              role="combobox"
+              value={query}
+            />
+          </span>
+        </label>
 
-      {selected ? (
-        <p className="selection-note"><span className="status good">Selected</span>{selected.locationName}</p>
-      ) : null}
-      {error ? <p className="danger-text form-note">{error}</p> : null}
-      {!loading && !error ? <p className="muted form-note">Only exact areas supplied by DataForSEO can be added.</p> : null}
+        {showList ? (
+          <div
+            className="rounded-xl border border-line divide-y divide-line max-h-64 overflow-auto shadow-lift bg-white"
+            id={LIST_ID}
+            role="listbox"
+            aria-label="Supported DataForSEO areas"
+          >
+            {matches.map((area, index) => {
+              const isHighlighted = index === highlighted;
+              return (
+                <button
+                  key={area.locationCode}
+                  id={optionId(area)}
+                  aria-selected={isHighlighted}
+                  role="option"
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => choose(area)}
+                  onMouseEnter={() => setHighlighted(index)}
+                  className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors ${isHighlighted ? "bg-accent/5 text-ink" : "text-ink hover:bg-paper"}`}
+                >
+                  <span className="truncate">{area.locationName}</span>
+                  <span className="text-xs text-slate shrink-0">{area.locationType}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
-      <button className="button" disabled={!selected} type="submit">Add Area</button>
+        {selected ? (
+          <p className="flex items-center gap-2 text-sm">
+            <StatusPill tone="accent">Selected</StatusPill>
+            <span className="truncate">{selected.locationName}</span>
+          </p>
+        ) : null}
+        {error ? <p className="text-xs text-blocked">{error}</p> : null}
+      </div>
+
+      <div className="flex justify-end mt-4">
+        <button className="btn-primary" disabled={!selected} type="submit">
+          <Icon name="add" className="w-3.5 h-3.5" />
+          Add area
+        </button>
+      </div>
     </form>
   );
 }

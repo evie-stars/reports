@@ -2,9 +2,14 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { DataForSeoClient, type DataForSeoApiResponse } from "@/lib/dataforseo";
 import { assertBudgetAvailable, configuredKeywordMetricsCostUsd } from "@/lib/dataforseo-costs";
+import {
+  asRecord as record,
+  errorMessage as describeError,
+  getDataForSeoError,
+  readTaskState
+} from "@/lib/dataforseo-response";
 import { prisma } from "@/lib/db";
-import { getDataForSeoError } from "@/lib/rank-runner";
-import { readTaskState } from "@/lib/rank-standard";
+import { configuredPositiveInteger } from "@/lib/env";
 
 export async function queueKeywordMetrics(projectId: string) {
   const project = await prisma.project.findUnique({
@@ -161,7 +166,7 @@ async function processKeywordMetricsQueueUnlocked(client: DataForSeoClient) {
           keywordMetricsTaskId: taskId,
           keywordMetricsPollAttempts: 0,
           keywordMetricsActualCostUsd: response.costUsd,
-          keywordMetricsNextPollAt: new Date(Date.now() + 10 * 60 * 1000),
+          keywordMetricsNextPollAt: nextMetricsPollAt(),
           keywordMetricsError: null
         }
       });
@@ -211,7 +216,7 @@ async function logMetricsRequest(response: DataForSeoApiResponse, tag: string) {
 
 async function rescheduleMetricsPoll(projectId: string, currentAttempts: number, message: string) {
   const attempts = currentAttempts + 1;
-  if (attempts >= configuredInteger("KEYWORD_METRICS_MAX_POLL_ATTEMPTS", 24)) {
+  if (attempts >= configuredPositiveInteger("KEYWORD_METRICS_MAX_POLL_ATTEMPTS", 24)) {
     await failProject(projectId, message || "Timed out waiting for DataForSEO keyword metrics.");
     return;
   }
@@ -219,10 +224,14 @@ async function rescheduleMetricsPoll(projectId: string, currentAttempts: number,
     where: { id: projectId },
     data: {
       keywordMetricsPollAttempts: attempts,
-      keywordMetricsNextPollAt: new Date(Date.now() + 10 * 60 * 1000),
+      keywordMetricsNextPollAt: nextMetricsPollAt(),
       keywordMetricsError: message
     }
   });
+}
+
+function nextMetricsPollAt() {
+  return new Date(Date.now() + configuredPositiveInteger("KEYWORD_METRICS_POLL_INTERVAL_MINUTES", 10) * 60 * 1000);
 }
 
 async function failProject(projectId: string, message: string) {
@@ -260,19 +269,10 @@ export function readKeywordMetrics(body: unknown) {
   });
 }
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
-}
-
 function nullableNumber(value: unknown) {
   return typeof value === "number" ? value : null;
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown keyword metrics failure.";
-}
-
-function configuredInteger(name: string, fallback: number) {
-  const value = Number.parseInt(process.env[name] ?? "", 10);
-  return Number.isInteger(value) && value > 0 ? value : fallback;
+  return describeError(error, "Unknown keyword metrics failure.");
 }

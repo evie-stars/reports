@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { readCost } from "@/lib/dataforseo-response";
+import { configuredPositiveInteger } from "@/lib/env";
+import { fetchWithTimeout, readJsonResponse } from "@/lib/http";
 
 const configSchema = z.object({
   DATAFORSEO_LOGIN: z.string().optional(),
@@ -46,7 +49,12 @@ export type DataForSeoLocation = {
   locationType: string;
 };
 
+type SerpSearchType = "organic" | "local_finder" | "maps";
+
 const locationCache = new Map<string, { expiresAt: number; locations: DataForSeoLocation[] }>();
+
+/** Reads (task_get, locations) are safe to repeat. Anything that creates a paid task is never retried. */
+const READ_RETRIES = 2;
 
 export class DataForSeoClient {
   private readonly login?: string;
@@ -68,26 +76,20 @@ export class DataForSeoClient {
     this.keywordMetricsEnabled = config.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   }
 
-  async postSerpTask(searchType: "organic" | "local_finder" | "maps", task: DataForSeoTask, mode?: DataForSeoMode) {
+  async postSerpTask(searchType: SerpSearchType, task: DataForSeoTask, mode?: DataForSeoMode): Promise<DataForSeoApiResponse> {
     const resolvedMode = mode ?? (this.sandboxDefault ? "sandbox" : "live");
     this.assertSafeToRun(resolvedMode, 1);
 
-    if (!this.login || !this.password) {
-      throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
-    }
-
     const host = resolvedMode === "sandbox" ? "sandbox.dataforseo.com" : "api.dataforseo.com";
     const endpoint = `/v3/serp/google/${searchType}/live/advanced`;
-    const response = await fetch(`https://${host}${endpoint}`, {
+    const response = await fetchWithTimeout(`https://${host}${endpoint}`, {
       method: "POST",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify([task])
+      headers: this.headers(),
+      body: JSON.stringify([task]),
+      timeoutMs: this.timeoutMs(),
+      retries: 0
     });
-
-    const body = await response.json();
+    const body = await readJsonResponse(response);
 
     return {
       endpoint,
@@ -100,65 +102,37 @@ export class DataForSeoClient {
     };
   }
 
+  /** The locations list is a free endpoint, so it is available in sandbox mode too. */
   async getGoogleLocations(countryCode = "gb") {
-    if (!this.login || !this.password) {
-      throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
-    }
-
     const country = countryCode.trim().toLowerCase();
     const cached = locationCache.get(country);
     if (cached && cached.expiresAt > Date.now()) return cached.locations;
 
-    const response = await fetch(`https://api.dataforseo.com/v3/serp/google/locations/${country}`, {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
-        "Content-Type": "application/json"
-      },
-      cache: "no-store"
+    const response = await fetchWithTimeout(`https://api.dataforseo.com/v3/serp/google/locations/${country}`, {
+      headers: this.headers(),
+      cache: "no-store",
+      timeoutMs: this.timeoutMs(),
+      retries: READ_RETRIES
     });
-    const body = await response.json();
-
-    if (!response.ok) {
-      throw new Error(`Unable to load DataForSEO locations (HTTP ${response.status}).`);
-    }
+    const body = await readJsonResponse(response);
+    if (!response.ok) throw new Error(`Unable to load DataForSEO locations (HTTP ${response.status}).`);
 
     const locations = readLocations(body);
-    if (locations.length === 0) {
-      throw new Error("DataForSEO returned no supported locations for this country.");
-    }
+    if (locations.length === 0) throw new Error("DataForSEO returned no supported locations for this country.");
 
-    locationCache.set(country, {
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      locations
-    });
-
+    locationCache.set(country, { expiresAt: Date.now() + 24 * 60 * 60 * 1000, locations });
     return locations;
   }
 
-  async postStandardSerpTasks(
-    searchType: "organic" | "local_finder" | "maps",
-    tasks: DataForSeoTask[]
-  ): Promise<DataForSeoApiResponse> {
+  async postStandardSerpTasks(searchType: SerpSearchType, tasks: DataForSeoTask[]): Promise<DataForSeoApiResponse> {
     this.assertPaidEnabled();
     this.assertStandardTaskCount(tasks.length);
-    const endpoint = `/v3/serp/google/${searchType}/task_post`;
-    return this.request(endpoint, { method: "POST", body: tasks });
+    return this.request(`/v3/serp/google/${searchType}/task_post`, { method: "POST", body: tasks });
   }
 
-  async getStandardSerpTask(
-    searchType: "organic" | "local_finder" | "maps",
-    taskId: string
-  ): Promise<DataForSeoApiResponse> {
+  async getStandardSerpTask(searchType: SerpSearchType, taskId: string): Promise<DataForSeoApiResponse> {
     this.assertPaidEnabled();
-    const endpoint = `/v3/serp/google/${searchType}/task_get/advanced/${encodeURIComponent(taskId)}`;
-    return this.request(endpoint);
-  }
-
-  async getReadySerpTaskIds(searchType: "organic" | "local_finder" | "maps") {
-    this.assertPaidEnabled();
-    const endpoint = `/v3/serp/google/${searchType}/tasks_ready`;
-    const response = await this.request(endpoint);
-    return { ...response, taskIds: readReadyTaskIds(response.responseBody) };
+    return this.request(`/v3/serp/google/${searchType}/task_get/advanced/${encodeURIComponent(taskId)}`);
   }
 
   async postKeywordMetricsTask(task: {
@@ -167,36 +141,19 @@ export class DataForSeoClient {
     language_code: string;
     tag: string;
   }): Promise<DataForSeoApiResponse> {
-    this.assertPaidEnabled();
-    if (!this.keywordMetricsEnabled) {
-      throw new Error("Keyword metrics calls are blocked. Set DATAFORSEO_KEYWORD_METRICS_ENABLED=true to enable them.");
-    }
-    const endpoint = "/v3/keywords_data/google_ads/search_volume/task_post";
-    return this.request(endpoint, { method: "POST", body: [task] });
+    this.assertKeywordMetricsEnabled();
+    return this.request("/v3/keywords_data/google_ads/search_volume/task_post", { method: "POST", body: [task] });
   }
 
   async getKeywordMetricsTask(taskId: string): Promise<DataForSeoApiResponse> {
-    this.assertPaidEnabled();
-    if (!this.keywordMetricsEnabled) {
-      throw new Error("Keyword metrics calls are blocked. Set DATAFORSEO_KEYWORD_METRICS_ENABLED=true to enable them.");
-    }
-    const endpoint = `/v3/keywords_data/google_ads/search_volume/task_get/${encodeURIComponent(taskId)}`;
-    return this.request(endpoint);
-  }
-
-  async getReadyKeywordMetricsTaskIds() {
-    this.assertPaidEnabled();
-    if (!this.keywordMetricsEnabled) return { taskIds: [] as string[] };
-    const endpoint = "/v3/keywords_data/google_ads/search_volume/tasks_ready";
-    const response = await this.request(endpoint);
-    return { ...response, taskIds: readReadyTaskIds(response.responseBody) };
+    this.assertKeywordMetricsEnabled();
+    return this.request(`/v3/keywords_data/google_ads/search_volume/task_get/${encodeURIComponent(taskId)}`);
   }
 
   assertSafeToRun(mode: DataForSeoMode, taskCount: number) {
     if (mode === "live" && !this.liveEnabled) {
       throw new Error("Live DataForSEO calls are blocked. Set DATAFORSEO_LIVE_ENABLED=true to allow a guarded live run.");
     }
-
     if (mode === "live" && taskCount > this.maxLiveTasks) {
       throw new Error(`Live run blocked: ${taskCount} tasks exceeds DATAFORSEO_MAX_LIVE_TASKS_PER_RUN=${this.maxLiveTasks}.`);
     }
@@ -224,24 +181,32 @@ export class DataForSeoClient {
     }
   }
 
+  private headers() {
+    if (!this.login || !this.password) throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
+    return {
+      Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
+      "Content-Type": "application/json"
+    };
+  }
+
+  private timeoutMs() {
+    return configuredPositiveInteger("DATAFORSEO_TIMEOUT_MS", 90_000);
+  }
+
   private async request(
     endpoint: string,
     options: { method?: "GET" | "POST"; body?: unknown } = {}
   ): Promise<DataForSeoApiResponse> {
-    if (!this.login || !this.password) {
-      throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
-    }
-
-    const response = await fetch(`https://api.dataforseo.com${endpoint}`, {
-      method: options.method ?? "GET",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
-        "Content-Type": "application/json"
-      },
+    const method = options.method ?? "GET";
+    const response = await fetchWithTimeout(`https://api.dataforseo.com${endpoint}`, {
+      method,
+      headers: this.headers(),
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      cache: "no-store"
+      cache: "no-store",
+      timeoutMs: this.timeoutMs(),
+      retries: method === "GET" ? READ_RETRIES : 0
     });
-    const body = await response.json();
+    const body = await readJsonResponse(response);
 
     return {
       endpoint,
@@ -275,43 +240,12 @@ function readLocations(body: unknown): DataForSeoLocation[] {
       ) {
         return [];
       }
-
       return [{
         locationCode: item.location_code,
         locationName: item.location_name,
         countryIsoCode: item.country_iso_code,
         locationType: item.location_type
       }];
-    });
-  });
-}
-
-function readCost(body: unknown) {
-  if (!body || typeof body !== "object") return 0;
-  const response = body as { cost?: unknown; tasks?: unknown };
-  if (typeof response.cost === "number") return response.cost;
-  if (!Array.isArray(response.tasks)) return 0;
-
-  return response.tasks.reduce((total, task) => {
-    if (!task || typeof task !== "object") return total;
-    const cost = (task as { cost?: unknown }).cost;
-    return total + (typeof cost === "number" ? cost : 0);
-  }, 0);
-}
-
-function readReadyTaskIds(body: unknown) {
-  if (!body || typeof body !== "object") return [];
-  const tasks = (body as { tasks?: unknown }).tasks;
-  if (!Array.isArray(tasks)) return [];
-
-  return tasks.flatMap((task) => {
-    if (!task || typeof task !== "object") return [];
-    const result = (task as { result?: unknown }).result;
-    if (!Array.isArray(result)) return [];
-    return result.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const id = (item as { id?: unknown }).id;
-      return typeof id === "string" ? [id] : [];
     });
   });
 }

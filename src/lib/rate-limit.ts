@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { configuredPositiveInteger } from "@/lib/env";
+
+export { configuredPositiveInteger };
 
 export class RateLimitError extends Error {
   readonly retryAfterSeconds: number;
@@ -18,17 +21,36 @@ export type RateLimitPolicy = {
   windowSeconds: number;
 };
 
+export type RateLimitBucketState = { count: number; expiresAt: Date } | null;
+
+export type RateLimitDecision =
+  | { kind: "reset" }
+  | { kind: "increment" }
+  | { kind: "reject"; retryAfterSeconds: number };
+
+/** Pure decision for one request against the current bucket state. */
+export function decideRateLimit(bucket: RateLimitBucketState, policy: RateLimitPolicy, now = new Date()): RateLimitDecision {
+  if (!bucket || bucket.expiresAt <= now) return { kind: "reset" };
+  if (bucket.count < policy.limit) return { kind: "increment" };
+  return { kind: "reject", retryAfterSeconds: Math.ceil((bucket.expiresAt.getTime() - now.getTime()) / 1000) };
+}
+
+export function rateLimitKey(scope: string, identifier: string) {
+  return createHash("sha256").update(scope + ":" + identifier.toLowerCase()).digest("hex");
+}
+
 export async function enforceRateLimit(scope: string, identifier: string, policy: RateLimitPolicy) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + policy.windowSeconds * 1000);
-  const key = createHash("sha256").update(scope + ":" + identifier.toLowerCase()).digest("hex");
+  const key = rateLimitKey(scope, identifier);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       await prisma.$transaction(async (tx) => {
         const bucket = await tx.rateLimitBucket.findUnique({ where: { key } });
+        const decision = decideRateLimit(bucket, policy, now);
 
-        if (!bucket || bucket.expiresAt <= now) {
+        if (decision.kind === "reset") {
           await tx.rateLimitBucket.upsert({
             where: { key },
             create: { key, scope, count: 1, windowStartedAt: now, expiresAt },
@@ -36,13 +58,13 @@ export async function enforceRateLimit(scope: string, identifier: string, policy
           });
           return;
         }
+        if (decision.kind === "reject") throw new RateLimitError(decision.retryAfterSeconds);
 
         const updated = await tx.rateLimitBucket.updateMany({
           where: { key, expiresAt: { gt: now }, count: { lt: policy.limit } },
           data: { count: { increment: 1 } }
         });
-
-        if (updated.count === 0) {
+        if (updated.count === 0 && bucket) {
           throw new RateLimitError(Math.ceil((bucket.expiresAt.getTime() - now.getTime()) / 1000));
         }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -72,11 +94,6 @@ export function gscImportRateLimit(): RateLimitPolicy {
 
 export function apiRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_API_REQUESTS_PER_MINUTE", 60), windowSeconds: 60 };
-}
-
-export function configuredPositiveInteger(name: string, fallback: number) {
-  const parsed = Number.parseInt(process.env[name] ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function isTransactionConflict(error: unknown) {

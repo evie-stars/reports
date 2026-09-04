@@ -1,26 +1,34 @@
-import type { Metadata } from "next";
-import { AppShell } from "@/components/app-shell";
-import { AccountControl } from "@/components/account-control";
-import { auth } from "../../auth";
-import { authenticationEnabled } from "@/lib/access";
+import type { Metadata, Viewport } from "next";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 
+const poppins = Poppins({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-poppins",
+  display: "swap"
+});
+
 export const metadata: Metadata = {
-  title: "Star Reports",
-  description: "Local SEO rank tracking and reporting hub"
+  title: "Report Hub",
+  description: "Local SEO rank tracking and client reporting for Star Websites"
 };
 
-export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const session = authenticationEnabled() ? await auth() : null;
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1E232D"
+};
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-      </head>
-      <body>
-        <AppShell accountControl={<AccountControl />} appRole={session?.user?.role}>{children}</AppShell>
+    <html lang="en" className={poppins.variable}>
+      {/* From md up the app is a fixed shell: dark backdrop, sidebar, and a light content panel
+          inset with rounded corners that scrolls inside itself. Phones stay full-bleed. */}
+      <body className="md:h-screen md:overflow-hidden">
+        <div aria-hidden className="fixed inset-0 -z-10 bg-sidebar" />
+        {children}
       </body>
     </html>
   );

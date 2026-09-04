@@ -1,14 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { Device, Prisma, RankRunSource, SearchType } from "@prisma/client";
+import { Device, Prisma, RankRunSource, SearchType, type RankRun } from "@prisma/client";
 import { z } from "zod";
-import type { AppRole } from "../../auth";
 import { DataForSeoClient } from "@/lib/dataforseo";
+import { errorMessage } from "@/lib/dataforseo-response";
 import { writeAuditLog } from "@/lib/audit";
-import { assertBudgetAvailable, estimateRankRunCost } from "@/lib/dataforseo-costs";
+import { assertBudgetAvailable, estimateRankRunCost, roundUsd, STANDARD_SERP_PAGE_COST_USD } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
+import { configuredPositiveInteger } from "@/lib/env";
 import { executeQueuedRankRun, type RankRunSelection } from "@/lib/rank-runner";
-import { collectStandardRankRuns, submitStandardRankRun } from "@/lib/rank-standard";
+import {
+  collectStandardRankRuns,
+  reapStalledStandardTasks,
+  resumeStalledStandardRuns,
+  submitStandardRankRun
+} from "@/lib/rank-standard";
 import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
+import type { AppRole } from "@/lib/roles";
 
 const queueSelectionSchema = z.object({
   projectId: z.string().min(1),
@@ -21,6 +28,8 @@ const queueSelectionSchema = z.object({
 
 export type QueueSelection = z.infer<typeof queueSelectionSchema>;
 
+const WORKER_LOCK_KEY = "rank-queue";
+
 export async function enqueueVerification(selection: QueueSelection, requestedByEmail: string) {
   return enqueueSelection(selection, "verification", requestedByEmail);
 }
@@ -29,11 +38,7 @@ export async function enqueueScheduledRankRun(selection: QueueSelection) {
   return enqueueSelection(selection, "scheduled", "scheduler");
 }
 
-export async function enqueueProjectRerun(input: {
-  projectId: string;
-  requestedByEmail: string;
-  role: AppRole;
-}) {
+export async function enqueueProjectRerun(input: { projectId: string; requestedByEmail: string; role: AppRole }) {
   const project = await prisma.project.findUnique({
     where: { id: input.projectId },
     include: {
@@ -92,45 +97,89 @@ async function enqueueSelection(selection: QueueSelection, source: RankRunSource
         notes: `${readableSource(source)} queued via ${deliveryMethod}: ${requestedTasks} task(s), up to ${parsed.pageLimit} organic result page(s).`
       }
     });
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   return run.id;
 }
 
+/**
+ * Retry a failed or blocked run. A Standard run keeps its identity and only its failed tasks
+ * are re-queued, so tasks DataForSEO already accepted are neither re-posted nor re-charged.
+ * Runs without stored tasks (blocked before submission, or live verifications) are queued afresh.
+ */
 export async function retryRankRun(runId: string, requestedByEmail: string) {
   const run = await prisma.rankRun.findUnique({ where: { id: runId } });
   if (!run || !["failed", "blocked"].includes(run.status)) throw new Error("Only failed or blocked reports can be retried.");
+
+  const storedTasks = await prisma.rankTask.count({ where: { runId: run.id } });
+  if (run.deliveryMethod === "standard" && storedTasks > 0) return requeueStandardRun(run, requestedByEmail);
+
   const selection = queueSelectionSchema.parse(run.selection);
   const replacementId = await enqueueSelection(
     { ...selection, searchTypes: currentSearchTypes(selection.searchTypes) },
     run.source === "scheduled" ? "scheduled" : "manual",
     requestedByEmail
   );
-  if (run.source === "scheduled") {
-    await prisma.reportExecution.updateMany({
-      where: { rankRunId: run.id },
-      data: {
-        rankRunId: replacementId,
-        rankingsStatus: "queued",
-        rankingsError: null,
-        status: "queued",
-        completedAt: null
-      }
-    });
-  }
+  if (run.source === "scheduled") await resetExecutionRankings(run.id, replacementId);
   return replacementId;
 }
 
-export async function processRankQueue(maxJobs = configuredMaxJobs()) {
+async function requeueStandardRun(run: RankRun, requestedByEmail: string) {
+  const selection = queueSelectionSchema.parse(run.selection);
+  const failed = await prisma.rankTask.findMany({ where: { runId: run.id, status: "failed" }, select: { searchType: true } });
+  if (failed.length === 0) throw new Error("This report has no failed tasks to retry.");
+  new DataForSeoClient().assertStandardTaskCount(failed.length);
+
+  const retryEstimateUsd = roundUsd(failed.reduce(
+    (total, task) => total + STANDARD_SERP_PAGE_COST_USD * (task.searchType === "organic" ? selection.pageLimit : 1),
+    0
+  ));
+
+  await prisma.$transaction(async (tx) => {
+    await assertBudgetAvailable(retryEstimateUsd, tx);
+    await tx.rankTask.updateMany({
+      where: { runId: run.id, status: "failed" },
+      data: { status: "queued", attempts: 0, externalTaskId: null, submittedAt: null, completedAt: null, lastError: null }
+    });
+    await tx.rankRun.update({
+      where: { id: run.id },
+      data: {
+        status: "queued",
+        availableAt: new Date(),
+        completedAt: null,
+        lastError: null,
+        requestedByEmail,
+        // The reservation is estimated minus actual, so the estimate must cover what was already spent plus the retry.
+        estimatedCostUsd: roundUsd(Number(run.actualCostUsd) + retryEstimateUsd),
+        notes: `${run.notes ?? "Queued report."} Retry queued for ${failed.length} failed task(s).`
+      }
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+  if (run.source === "scheduled") await resetExecutionRankings(run.id, run.id);
+  return run.id;
+}
+
+async function resetExecutionRankings(previousRunId: string, rankRunId: string) {
+  await prisma.reportExecution.updateMany({
+    where: { rankRunId: previousRunId },
+    data: { rankRunId, rankingsStatus: "queued", rankingsError: null, status: "queued", completedAt: null }
+  });
+}
+
+export async function processRankQueue(maxJobs = configuredPositiveInteger("RANK_QUEUE_MAX_JOBS", 1)) {
   const owner = randomUUID();
-  if (!(await acquireWorkerLock(owner))) return { processed: 0, locked: true };
+  if (!(await acquireWorkerLock(owner))) return { processed: 0, collected: 0, reaped: 0, resumed: 0, locked: true };
   let processed = 0;
-  let collected = 0;
+  let attempts = 0;
 
   try {
-    collected = await collectStandardRankRuns();
-    while (processed < maxJobs) {
+    const reaped = await reapStalledStandardTasks();
+    const resumed = await resumeStalledStandardRuns();
+    const collected = await collectStandardRankRuns();
+
+    // A failed claim (another process took the run first) counts as an attempt so the loop always terminates.
+    while (processed < maxJobs && attempts < maxJobs + 5) {
+      attempts += 1;
       const candidate = await prisma.rankRun.findFirst({
         where: { status: "queued", sandbox: false, availableAt: { lte: new Date() } },
         orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }]
@@ -147,53 +196,34 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
         const selection = queueSelectionSchema.parse(candidate.selection);
         if (candidate.source === "verification") {
           await executeQueuedRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
-          await writeAuditLog({
-            event: "report.run_completed",
-            actorEmail: "system",
-            actorRole: "system",
-            entityType: "rankRun",
-            entityId: candidate.id
-          });
+          await writeSystemAudit("report.run_completed", candidate.id);
         } else {
           await submitStandardRankRun(candidate.id, rankSelection(selection), selection.pageLimit);
-          await writeAuditLog({
-            event: "report.run_submitted",
-            actorEmail: "system",
-            actorRole: "system",
-            entityType: "rankRun",
-            entityId: candidate.id
-          });
+          await writeSystemAudit("report.run_submitted", candidate.id);
         }
       } catch (error) {
+        const message = errorMessage(error, "Unknown queue failure.");
         await prisma.rankRun.update({
           where: { id: candidate.id },
           data: {
             status: "failed",
             completedAt: new Date(),
-            lastError: errorMessage(error),
-            notes: `${candidate.notes ?? "Queued report."} Failed: ${errorMessage(error)}`
+            lastError: message,
+            notes: `${candidate.notes ?? "Queued report."} Failed: ${message}`
           }
         });
-        await writeAuditLog({
-          event: "report.run_failed",
-          outcome: "failure",
-          actorEmail: "system",
-          actorRole: "system",
-          entityType: "rankRun",
-          entityId: candidate.id,
-          metadata: { error: errorMessage(error) }
-        });
+        await writeSystemAudit("report.run_failed", candidate.id, { error: message }, "failure");
       }
       processed += 1;
     }
-    return { processed, collected, locked: false };
+    return { processed, collected, reaped, resumed, locked: false };
   } finally {
     await releaseWorkerLock(owner);
   }
 }
 
 async function assertTeamCooldown(projectId: string) {
-  const days = positiveInteger(process.env.RANK_TEAM_COOLDOWN_DAYS ?? process.env.RANK_SALES_COOLDOWN_DAYS, 7);
+  const days = configuredPositiveInteger("RANK_TEAM_COOLDOWN_DAYS", 7);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const recent = await prisma.rankRun.findFirst({
     where: {
@@ -210,21 +240,39 @@ async function assertTeamCooldown(projectId: string) {
 
 async function acquireWorkerLock(owner: string) {
   await prisma.systemLock.upsert({
-    where: { key: "rank-queue" },
-    create: { key: "rank-queue", owner: null, lockedUntil: new Date(0) },
+    where: { key: WORKER_LOCK_KEY },
+    create: { key: WORKER_LOCK_KEY, owner: null, lockedUntil: new Date(0) },
     update: {}
   });
+  const lockMinutes = configuredPositiveInteger("RANK_QUEUE_LOCK_MINUTES", 120);
   const claimed = await prisma.systemLock.updateMany({
-    where: { key: "rank-queue", lockedUntil: { lt: new Date() } },
-    data: { owner, lockedUntil: new Date(Date.now() + 2 * 60 * 60 * 1000) }
+    where: { key: WORKER_LOCK_KEY, lockedUntil: { lt: new Date() } },
+    data: { owner, lockedUntil: new Date(Date.now() + lockMinutes * 60 * 1000) }
   });
   return claimed.count === 1;
 }
 
 async function releaseWorkerLock(owner: string) {
   await prisma.systemLock.updateMany({
-    where: { key: "rank-queue", owner },
+    where: { key: WORKER_LOCK_KEY, owner },
     data: { owner: null, lockedUntil: new Date(0) }
+  });
+}
+
+async function writeSystemAudit(
+  event: string,
+  runId: string,
+  metadata?: Record<string, string>,
+  outcome: "success" | "failure" = "success"
+) {
+  await writeAuditLog({
+    event,
+    outcome,
+    actorEmail: "system",
+    actorRole: "system",
+    entityType: "rankRun",
+    entityId: runId,
+    ...(metadata ? { metadata } : {})
   });
 }
 
@@ -243,21 +291,8 @@ export function currentSearchTypes(searchTypes: SearchType[]) {
   return filtered.length > 0 ? filtered : [SearchType.organic];
 }
 
-function configuredMaxJobs() {
-  return positiveInteger(process.env.RANK_QUEUE_MAX_JOBS, 1);
-}
-
-function positiveInteger(value: string | undefined, fallback: number) {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function readableSource(source: RankRunSource) {
   if (source === "verification") return "Live verification";
   if (source === "scheduled") return "Monthly report";
   return "Ad hoc report";
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown queue failure.";
 }

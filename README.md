@@ -32,11 +32,13 @@ Organic checks can be capped between one and ten result pages, while Google Maps
 
 `DATAFORSEO_MONTHLY_BUDGET_USD` is a hard application-level monthly ceiling. The queue reserves the maximum estimated cost before accepting a run, then stores the exact DataForSEO-reported charge. Polling requests are excluded from spend totals so task cost is not counted twice. The Rank Runs screen shows current spend, reservations, available budget, task progress, failures, retries, and upcoming schedules.
 
-The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks. Team users cannot queue another full report within `RANK_TEAM_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; managers and administrators can override that cooldown.
+The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks.
+
+Each Standard task carries a unique `tag`, and DataForSEO's `task_post` response is matched back to our tasks by that tag rather than by array position, so a reordered or partially rejected batch cannot file one keyword's rankings against another. Every outbound request has a timeout (`HTTP_TIMEOUT_MS`, and `DATAFORSEO_TIMEOUT_MS` for the slower SERP endpoints); reads are retried with backoff, but nothing that creates a paid task is ever retried automatically. On each run the worker also reaps tasks left in `submitting` for longer than `RANK_TASK_STALE_MINUTES` (a crash between posting and recording the answer) and resumes runs whose tasks were created but never posted. Retrying a failed Standard report re-queues only its failed tasks on the same run, reserving budget for just that remainder, so tasks DataForSEO already accepted are never paid for twice. Team users cannot queue another full report within `RANK_TEAM_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; managers and administrators can override that cooldown.
 
 The Scheduled workspace lists every enabled monthly report, its next run date, coverage, search depth, devices, enabled data, and latest execution outcome. SEO, Maps, and Search Console can be toggled independently. The client report keeps them under one project but separates Overview, SEO, and Maps into focused views. GA4 appears as a planned module until that integration is connected.
 
-Each due schedule creates one coordinated execution record. The worker queues the selected SEO and Maps checks, refreshes a mapped Search Console property, and records each source separately. A report can therefore finish as partially successful without hiding the data that completed. In-app dashboard alerts surface failed, blocked, and partial executions to administrators. Existing scheduled rank runs from the current month are attached rather than submitted again.
+A schedule day later than the current month's last day runs on that last day instead of being skipped. Each due schedule creates one coordinated execution record. The worker queues the selected SEO and Maps checks, refreshes a mapped Search Console property, and records each source separately. A report can therefore finish as partially successful without hiding the data that completed. In-app dashboard alerts surface failed, blocked, and partial executions to administrators. Existing scheduled rank runs from the current month are attached rather than submitted again.
 
 ## Keyword Demand
 
@@ -52,7 +54,7 @@ Authentication is off until `AUTH_ENABLED=true`. Create a Google OAuth web clien
 https://reports.starwebsites.co.uk/api/auth/callback/google
 ```
 
-Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
+Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. When the user table is unavailable, sign-ins fail closed rather than falling back to the domain allowlist. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
 - **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
 - **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console property mapping.
@@ -62,7 +64,9 @@ The dashboard access panel records successful users automatically, supports dire
 
 ## Security Controls
 
-- Global CSP, HSTS, frame, MIME-sniffing, referrer, and browser-permission headers are applied by Next.js.
+- A per-request nonce-based Content Security Policy is set in `src/proxy.ts`. Scripts run only when they carry the request nonce, so injected inline scripts cannot execute. HSTS, frame, MIME-sniffing, referrer, and browser-permission headers are applied by Next.js.
+- A production server (`NODE_ENV=production`) refuses to start unless `AUTH_ENABLED=true` and `AUTH_SECRET` are set, so the local "everyone is an administrator" mode can never reach a live deployment.
+- If the managed user table cannot be read during sign-in or session refresh, access is denied until the database recovers. Only `AUTH_ADMIN_EMAILS` remain reachable, as the emergency recovery path.
 - Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, and share-link changes are stored in the admin audit trail.
 - Database-backed limits protect authenticated mutations, paid reports, share-link changes, Google sign-ins, and the locations API. Limits are configurable with the `RATE_LIMIT_*` environment variables.
 - The rank worker records a heartbeat on every run. The dashboard and Settings page flag stale workers and failed or blocked jobs from the last seven days.
@@ -72,8 +76,9 @@ The dashboard access panel records successful users automatically, supports dire
 
 Complete these infrastructure-level items as the reporting integrations expand:
 
-7. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
-10. Complete a focused application and infrastructure security review before importing broader GA4 datasets.
+1. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
+2. Complete a focused application and infrastructure security review before importing broader GA4 datasets.
+3. Rate limit and audit the read-only `/share/*` pages, which are reachable without a Google account.
 
 ## Google Search Console
 
@@ -99,6 +104,10 @@ Generate the encryption key once with `openssl rand -hex 32`, store it with the 
 After deployment, open **Settings**, connect the Google account, then open a report's settings and select its Search Console property. The integration requests only `webmasters.readonly` access. Disconnecting in Report Hub removes the locally stored token and report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
 Mapped reports can manually import the previous 90 complete days of final Web search totals. Enabled monthly schedules refresh the same data automatically. One daily aggregate is stored per report with clicks, impressions, CTR, and average position. Re-running the import replaces that same date range, so refreshes are idempotent rather than additive. The client report displays the totals and a clicks/impressions trend using the same period and project filters as the ranking report. Each Google request is also recorded in the API audit with a zero cost. Manual imports are limited by `RATE_LIMIT_GSC_IMPORTS_PER_HOUR`; scheduled worker invocations process at most `SCHEDULED_REPORT_MAX_GSC_IMPORTS` imports at once.
+
+## Design System
+
+The workspace shares its design language with Team Hub: Tailwind CSS v3 with the same tokens (`tailwind.config.js`), Poppins loaded through `next/font`, the Interface line icon set in `src/components/icon.tsx`, and a dark gradient backdrop with the light content panel inset beside a fixed sidebar. Reusable pieces live in `src/components/ui/` (page header, stat card, status pill, notice, section card, empty state, table wrapper, tabs, copy link) and the shell in `src/components/shell/`. Formatting helpers for dates, money and status colours are in `src/lib/format.ts`. Pages live in the `(app)` route group, which renders the shell, while `/login` and the read-only `/share/*` pages live in `(public)`.
 
 ## Local Setup
 
@@ -172,4 +181,6 @@ Run the no-spend contract suite before deployment:
 npm test
 ```
 
-The tests use fixed response fixtures and never contact DataForSEO.
+The tests use fixed response fixtures and never contact DataForSEO or a database. The same suite, together with linting, a type check, and a production build, runs in GitHub Actions on every push and pull request (`.github/workflows/ci.yml`).
+
+`npm run rank:sandbox` runs one immediate sandbox check for the first active keyword. `npm run rank:live` queues one paid verification through the normal budget reservation and worker path rather than calling DataForSEO directly, so no spend can happen outside the ledger.

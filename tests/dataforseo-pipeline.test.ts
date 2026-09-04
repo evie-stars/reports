@@ -5,7 +5,7 @@ import { estimateRankRunCost } from "../src/lib/dataforseo-costs";
 import { readKeywordMetrics } from "../src/lib/keyword-metrics";
 import { buildRankMatrix } from "../src/components/rank-matrix";
 import { countPositionBuckets } from "../src/lib/client-report";
-import { readTaskState } from "../src/lib/rank-standard";
+import { readTaskState } from "../src/lib/dataforseo-response";
 
 test("estimates Standard SERP pages before a report is queued", () => {
   const cost = estimateRankRunCost({

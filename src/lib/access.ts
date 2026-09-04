@@ -1,5 +1,10 @@
-import { auth, type AppRole } from "../../auth";
 import { redirect } from "next/navigation";
+import { auth } from "../../auth";
+import { isProduction } from "@/lib/env";
+import { canManageReports, type AppRole } from "@/lib/roles";
+import { assertAuthenticationConfigured } from "@/lib/startup-checks";
+
+export { canManageReports };
 
 export type CurrentActor = {
   email: string;
@@ -13,6 +18,8 @@ export function authenticationEnabled() {
 
 export async function currentActor(): Promise<CurrentActor> {
   if (!authenticationEnabled()) {
+    // Never hand out the local administrator identity on a production server.
+    if (isProduction()) assertAuthenticationConfigured();
     return { email: "local-admin", name: "Local admin", role: "admin" };
   }
 
@@ -33,10 +40,6 @@ export async function requireAdmin() {
 
 export async function requireManager() {
   const actor = await currentActor();
-  if (actor.role === "team") throw new Error("Manager access is required.");
+  if (!canManageReports(actor.role)) throw new Error("Manager access is required.");
   return actor;
-}
-
-export function canManageReports(role: AppRole) {
-  return role === "admin" || role === "manager";
 }

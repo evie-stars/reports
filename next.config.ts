@@ -1,18 +1,6 @@
 import type { NextConfig } from "next";
 
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "connect-src 'self'",
-  "font-src 'self' https://fonts.gstatic.com data:",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "img-src 'self' data: https:",
-  "object-src 'none'",
-  "script-src 'self' 'unsafe-inline'" + (process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""),
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
-].join("; ");
-
+// The Content-Security-Policy is set per request in src/proxy.ts so that it can carry a nonce.
 const nextConfig: NextConfig = {
   output: "standalone",
   async headers() {
@@ -20,7 +8,6 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: contentSecurityPolicy },
           { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=()" },
           { key: "Referrer-Policy", value: "no-referrer" },
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },

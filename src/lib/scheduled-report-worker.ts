@@ -8,11 +8,14 @@ import {
 } from "@prisma/client";
 import { writeAuditLog } from "@/lib/audit";
 import { estimateRankRunCost } from "@/lib/dataforseo-costs";
+import { errorMessage as describeError } from "@/lib/dataforseo-response";
 import { prisma } from "@/lib/db";
+import { configuredPositiveInteger } from "@/lib/env";
 import { importProjectSearchConsoleData } from "@/lib/gsc-import";
 import { enqueueScheduledRankRun, type QueueSelection } from "@/lib/rank-queue";
 import { deriveReportExecutionStatus, isTerminalReportExecutionStatus } from "@/lib/report-execution-status";
 import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
+import { effectiveScheduleDay, scheduleIsDue } from "@/lib/schedules";
 
 type ScheduledProject = Project & {
   keywords: { id: string }[];
@@ -21,7 +24,7 @@ type ScheduledProject = Project & {
 
 export async function enqueueDueReportExecutions(now = new Date()) {
   const projects = await prisma.project.findMany({
-    where: { scheduleEnabled: true, scheduleDay: { lte: now.getUTCDate() } },
+    where: { scheduleEnabled: true },
     include: {
       keywords: { where: { active: true }, select: { id: true } },
       locations: { where: { active: true }, select: { id: true } }
@@ -29,7 +32,8 @@ export async function enqueueDueReportExecutions(now = new Date()) {
   });
   let queued = 0;
 
-  for (const project of projects) {
+  // The day is clamped to the current month's length so a schedule on the 31st still runs in shorter months.
+  for (const project of projects.filter((project) => scheduleIsDue(project.scheduleDay, now))) {
     if (await createExecution(project, now)) queued += 1;
   }
   return queued;
@@ -73,7 +77,11 @@ export async function processScheduledReportExecutions(maxGscImports = configure
 
 async function createExecution(project: ScheduledProject, now: Date) {
   const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const scheduledFor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), project.scheduleDay));
+  const scheduledFor = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    effectiveScheduleDay(project.scheduleDay, now.getUTCFullYear(), now.getUTCMonth())
+  ));
   const modules = [...project.reportModules];
   if (
     enabledRankSearchTypes(project.reportModules, project.scheduleSearchTypes).includes(SearchType.maps) &&
@@ -276,10 +284,9 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 function configuredMaxGscImports() {
-  const parsed = Number.parseInt(process.env.SCHEDULED_REPORT_MAX_GSC_IMPORTS ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 2;
+  return configuredPositiveInteger("SCHEDULED_REPORT_MAX_GSC_IMPORTS", 2);
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown scheduled report failure.";
+  return describeError(error, "Unknown scheduled report failure.");
 }

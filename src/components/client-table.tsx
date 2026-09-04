@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
+import { EmptyRow, TableWrap } from "@/components/ui/table";
 
 export type ClientRow = {
   id: string;
@@ -22,58 +23,55 @@ export function ClientTable({ clients }: { clients: ClientRow[] }) {
   }, [clients, query]);
 
   return (
-    <>
-      <div className="table-tools">
-        <div className="search-field client-search">
-          <Icon name="search" />
+    <div>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+        <div className="relative flex-1 max-w-md">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate"><Icon name="search" className="w-4 h-4" /></span>
           <input
             aria-label="Search clients"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search clients"
+            placeholder="Search clients…"
             type="search"
             value={query}
+            className="field pl-9"
           />
         </div>
-        <span className="muted table-count">{filteredClients.length} client{filteredClients.length === 1 ? "" : "s"}</span>
+        <p className="text-xs text-slate sm:ml-auto">{filteredClients.length} of {clients.length} clients</p>
       </div>
 
-      <div className="table-scroll">
-        <table className="table client-list-table">
+      <TableWrap maxHeight="calc(100vh - 16rem)">
+        <table className="table">
           <thead>
             <tr>
-              <th>Client</th>
-              <th>Reports</th>
-              <th>Keywords</th>
-              <th>Areas</th>
-              <th>Last Checked</th>
-              <th><span className="sr-only">Open</span></th>
+              <th className="th-sticky">Client</th>
+              <th className="th-sticky">Reports</th>
+              <th className="th-sticky">Keywords</th>
+              <th className="th-sticky">Areas</th>
+              <th className="th-sticky">Last checked</th>
+              <th className="th-sticky"><span className="sr-only">Open</span></th>
             </tr>
           </thead>
           <tbody>
             {filteredClients.map((client) => (
               <tr key={client.id}>
-                <td><Link className="client-name-link" href={`/clients/${client.id}`}>{client.name}</Link></td>
+                <td><Link className="font-medium hover:text-accent hover:underline" href={`/clients/${client.id}`}>{client.name}</Link></td>
                 <td>{client.projectCount}</td>
                 <td>{client.keywordCount}</td>
                 <td>{client.areaCount}</td>
-                <td>{client.lastReport ?? <span className="muted">Not checked</span>}</td>
-                <td className="table-action-cell">
-                  <Link className="icon-button" href={`/clients/${client.id}`} title={`Open ${client.name} report`}>
-                    <Icon name="graph" label={`Open ${client.name} report`} />
+                <td className="text-slate">{client.lastReport ?? "Not checked"}</td>
+                <td className="text-right">
+                  <Link className="btn-icon" href={`/clients/${client.id}`} title={`Open ${client.name} report`}>
+                    <Icon name="eye" className="w-4 h-4" title={`Open ${client.name} report`} />
                   </Link>
                 </td>
               </tr>
             ))}
             {filteredClients.length === 0 ? (
-              <tr>
-                <td className="empty-table" colSpan={6}>
-                  {query ? `No clients match “${query}”.` : "No clients have been added yet."}
-                </td>
-              </tr>
+              <EmptyRow colSpan={6}>{query ? `No clients match “${query}”.` : "No clients have been added yet."}</EmptyRow>
             ) : null}
           </tbody>
         </table>
-      </div>
-    </>
+      </TableWrap>
+    </div>
   );
 }
