@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
+    "db:check": "node --env-file=.env --import tsx scripts/check-duplicates.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "rank:sandbox": "tsx scripts/run-rank-check.ts --sandbox",

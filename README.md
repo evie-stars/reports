@@ -139,6 +139,16 @@ The workspace shares its design language with Team Hub: Tailwind CSS v3 with the
    npm run dev
    ```
 
+## Upgrading An Existing Database
+
+The schema enforces one keyword phrase per report and one ranking result per run, keyword, area, result type and device. Before pushing the schema to a database that already holds data, run:
+
+```bash
+npm run db:check
+```
+
+It lists any rows that would violate those constraints and exits non-zero until they are resolved.
+
 ## Plesk Setup Outline
 
 1. Create a Node.js app in Plesk pointing at this project directory.
