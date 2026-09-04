@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
+  createReportSnapshot,
   createProject,
   disableClientShare,
   enableClientShare,
   regenerateClientShare,
+  regenerateReportSnapshot,
+  revokeReportSnapshot,
   queueProjectRerun,
   updateClient
 } from "@/app/actions";
@@ -12,12 +15,14 @@ import { ClientReportDashboard } from "@/components/client-report-dashboard";
 import { CopyShareLink } from "@/components/copy-share-link";
 import { CopyShareButton } from "@/components/copy-share-button";
 import { Icon } from "@/components/icon";
+import { SnapshotCreateForm } from "@/components/snapshot-create-form";
 import { SubmitButton } from "@/components/submit-button";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
 import { canManageReports, currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
+import { reportSnapshotStatus } from "@/lib/report-snapshot";
 import type { AppRole } from "../../../../auth";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +47,22 @@ export default async function ClientDetailPage({ params, searchParams }: {
           keywords: { where: { active: true }, select: { id: true } },
           locations: { where: { active: true }, select: { id: true } }
         }
+      },
+      reportSnapshots: {
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          slug: true,
+          token: true,
+          modules: true,
+          expiresAt: true,
+          revokedAt: true,
+          createdByEmail: true,
+          accessCount: true,
+          lastAccessedAt: true,
+          createdAt: true
+        }
       }
     }
   });
@@ -59,6 +80,12 @@ export default async function ClientDetailPage({ params, searchParams }: {
     const enableShareWithId = enableClientShare.bind(null, client.id);
     const disableShareWithId = disableClientShare.bind(null, client.id);
     const regenerateShareWithId = regenerateClientShare.bind(null, client.id);
+    const createSnapshotWithId = createReportSnapshot.bind(null, client.id);
+    const snapshotAvailability = {
+      rankings: client.projects.some((project) => project.reportModules.includes("rankings")),
+      maps: client.projects.some((project) => project.reportModules.includes("maps") || project.scheduleSearchTypes.includes("maps")),
+      gsc: client.projects.some((project) => project.reportModules.includes("gsc") && Boolean(project.gscPropertyUrl) && project.gscImportedRows > 0)
+    };
 
     return (
       <>
@@ -83,11 +110,57 @@ export default async function ClientDetailPage({ params, searchParams }: {
             </form>
           </div>
 
+          <section className="card spaced-section snapshot-settings" id="report-snapshots">
+            <div className="section-heading snapshot-heading">
+              <div>
+                <p className="label label-with-icon"><Icon name="graph" />One-off Client Reports</p>
+                <h3>Frozen report snapshots</h3>
+                <p className="muted">Create a private client-facing report from the data stored right now. It will not change as new checks arrive.</p>
+              </div>
+              <span className="snapshot-count">{client.reportSnapshots.length} recent</span>
+            </div>
+
+            <SnapshotCreateForm action={createSnapshotWithId} availability={snapshotAvailability} />
+
+            {client.reportSnapshots.length > 0 ? (
+              <div className="table-scroll snapshot-table-wrap">
+                <table className="table snapshot-table">
+                  <thead><tr><th>Created</th><th>Content</th><th>Status</th><th>Activity</th><th>Private link</th><th><span className="sr-only">Actions</span></th></tr></thead>
+                  <tbody>
+                    {client.reportSnapshots.map((snapshot) => {
+                      const status = reportSnapshotStatus(snapshot);
+                      const regenerateSnapshot = regenerateReportSnapshot.bind(null, snapshot.id);
+                      const revokeSnapshot = revokeReportSnapshot.bind(null, snapshot.id);
+                      const path = `/share/${snapshot.slug}/${snapshot.token}`;
+                      return (
+                        <tr key={snapshot.id}>
+                          <td><strong>{snapshot.createdAt.toLocaleDateString("en-GB")}</strong><small>{snapshot.createdByEmail}</small></td>
+                          <td><span className="snapshot-modules">{snapshot.modules.map(snapshotModuleLabel).join(" + ")}</span></td>
+                          <td><span className={`status ${status === "active" ? "good" : status === "expired" ? "warn" : "danger"}`}>{status}</span><small>{status === "active" ? `Expires ${snapshot.expiresAt.toLocaleDateString("en-GB")}` : "Link unavailable"}</small></td>
+                          <td><strong>{snapshot.accessCount} view{snapshot.accessCount === 1 ? "" : "s"}</strong><small>{snapshot.lastAccessedAt ? `Last ${snapshot.lastAccessedAt.toLocaleDateString("en-GB")}` : "Not opened yet"}</small></td>
+                          <td>{status === "active" ? <CopyShareLink path={path} /> : <span className="muted">No active link</span>}</td>
+                          <td><div className="snapshot-actions">
+                              {status === "active" ? <a className="button button-secondary" href={path} target="_blank" rel="noreferrer">View</a> : null}
+                              <form action={regenerateSnapshot}>
+                                <input type="hidden" name="shareExpiryDays" value="30" />
+                                <SubmitButton className="button button-secondary" confirmMessage="Refresh this snapshot with today’s stored data and replace its private link?" pendingLabel="Refreshing...">Refresh</SubmitButton>
+                              </form>
+                              {status === "active" ? <form action={revokeSnapshot}><SubmitButton className="button button-danger" confirmMessage="Revoke this snapshot link? It will stop working immediately." pendingLabel="Revoking...">Revoke</SubmitButton></form> : null}
+                            </div></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : <div className="snapshot-empty"><strong>No snapshots yet</strong><span>Create one when a client needs a fixed, time-limited report.</span></div>}
+          </section>
+
           {actor.role === "admin" ? <section className="card spaced-section share-settings">
             <div>
               <p className="label label-with-icon"><Icon name="tags" />Client Access</p>
-              <h3>Read-only report link</h3>
-              <p className="muted">Anyone with this private link can view the client report. They cannot edit settings or run checks.</p>
+              <h3>Always-current report link</h3>
+              <p className="muted">This private link always shows the latest stored client data. Viewers cannot edit settings or run checks.</p>
             </div>
             {shareActive && client.shareToken && client.shareExpiresAt ? (
               <div className="share-controls">
@@ -167,10 +240,10 @@ export default async function ClientDetailPage({ params, searchParams }: {
   );
 }
 
-function ShareExpirySelect() {
+function ShareExpirySelect({ label = "Link lifetime" }: { label?: string }) {
   return (
     <label className="share-expiry-select">
-      Link lifetime
+      {label}
       <select name="shareExpiryDays" defaultValue="30">
         <option value="7">7 days</option>
         <option value="30">30 days</option>
@@ -207,6 +280,7 @@ function ClientHeader({
         <p>{settingsOpen ? "Client and report settings" : "Local search performance report"}</p>
       </div>
       <div className="page-header-actions">
+        {!settingsOpen && canManageReports(role) ? <Link className="button button-secondary" href={`/clients/${clientId}?view=settings#report-snapshots`}>Create Snapshot</Link> : null}
         {!settingsOpen && role === "admin" && shareEnabled && shareToken ? <CopyShareButton path={`/share/${shareToken}`} /> : null}
         {!settingsOpen && !shareEnabled && role === "admin" ? (
           <form action={enableShare}><button className="button button-secondary" type="submit">Create Client Link</button></form>
@@ -239,4 +313,11 @@ function ClientHeader({
       </div>
     </header>
   );
+}
+
+function snapshotModuleLabel(module: string) {
+  if (module === "rankings") return "SEO";
+  if (module === "maps") return "Maps";
+  if (module === "gsc") return "Search Console";
+  return "Analytics";
 }

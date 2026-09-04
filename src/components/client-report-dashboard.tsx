@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { Icon } from "@/components/icon";
 import { buildRankMatrix, RankMatrix, RankMatrixRank, type RankMatrixResult } from "@/components/rank-matrix";
-import type { ClientReportData, CurrentReportResult } from "@/lib/client-report";
+import type { ClientReportViewData, CurrentReportResult } from "@/lib/client-report";
 
 export function ClientReportDashboard({
   data,
   basePath,
-  readOnly = false
+  readOnly = false,
+  frozen = false
 }: {
-  data: ClientReportData;
+  data: ClientReportViewData;
   basePath: string;
   readOnly?: boolean;
+  frozen?: boolean;
 }) {
   const { filters, latestResults, stats } = data;
   const closeDrawerHref = reportHref(basePath, filters);
@@ -57,7 +59,7 @@ export function ClientReportDashboard({
         <SearchConsolePerformance data={data.gsc} />
       ) : null}
 
-      {data.modules.rankings ? <form className="report-filters spaced-section" action={basePath} method="get">
+      {data.modules.rankings && !frozen ? <form className="report-filters spaced-section" action={basePath} method="get">
         {filters.section !== "overview" ? <input type="hidden" name="section" value={filters.section} /> : null}
         <input type="hidden" name="sort" value={filters.sort} />
         <input type="hidden" name="dir" value={filters.sortDirection} />
@@ -105,15 +107,17 @@ export function ClientReportDashboard({
           </div>
           <span className="muted">{matrixRowCount} keyword{matrixRowCount === 1 ? "" : "s"}</span>
         </div>
-        <div className="matrix-sort-links" aria-label="Ranking result sorting">
+        {!frozen ? <div className="matrix-sort-links" aria-label="Ranking result sorting">
           <SortableLink basePath={basePath} column="keyword" filters={filters} label="Keyword" />
           <SortableLink basePath={basePath} column="area" filters={filters} label="Area" />
           <SortableLink basePath={basePath} column="current" filters={filters} label="Best rank" />
-        </div>
+        </div> : null}
         <RankMatrix
           results={matrixResults}
-          emptyMessage={`No live rankings match these filters${readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}`}
-          keywordHref={(keywordId) => reportHref(basePath, filters, keywordId)}
+          emptyMessage={frozen
+            ? "No rankings were included in this snapshot."
+            : `No live rankings match these filters${readOnly ? "." : ". Adjust the filters or configure a live check in report settings."}`}
+          keywordHref={frozen ? undefined : (keywordId) => reportHref(basePath, filters, keywordId)}
           showChecked
           showVolume
         />
@@ -148,8 +152,8 @@ function SortableLink({
   label
 }: {
   basePath: string;
-  column: ClientReportData["filters"]["sort"];
-  filters: ClientReportData["filters"];
+  column: ClientReportViewData["filters"]["sort"];
+  filters: ClientReportViewData["filters"];
   label: string;
 }) {
   const active = filters.sort === column;
@@ -204,7 +208,7 @@ function toMatrixResult(result: CurrentReportResult): RankMatrixResult {
   };
 }
 
-function PositionDistributionChart({ points }: { points: ClientReportData["trend"] }) {
+function PositionDistributionChart({ points }: { points: ClientReportViewData["trend"] }) {
   if (points.length < 2) {
     return <div className="chart-empty">A progress chart will appear after at least two check dates in this period.</div>;
   }
@@ -275,7 +279,7 @@ function PositionDistributionChart({ points }: { points: ClientReportData["trend
   );
 }
 
-function SearchConsolePerformance({ data }: { data: ClientReportData["gsc"] }) {
+function SearchConsolePerformance({ data }: { data: ClientReportViewData["gsc"] }) {
   return (
     <section className="card gsc-performance-card spaced-section">
       <div className="section-heading report-section-heading">
@@ -304,7 +308,7 @@ function GscMetric({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function SearchConsoleChart({ points }: { points: ClientReportData["gsc"]["trend"] }) {
+function SearchConsoleChart({ points }: { points: ClientReportViewData["gsc"]["trend"] }) {
   if (points.length < 2) {
     return <div className="chart-empty compact">Import Search Console data to see clicks and impressions over time.</div>;
   }
@@ -379,7 +383,7 @@ function KeywordDrawer({
   monthlySearches
 }: {
   closeHref: string;
-  history: ClientReportData["keywordHistory"];
+  history: ClientReportViewData["keywordHistory"];
   keyword: string;
   targetUrl: string | null;
   searchVolume: number | null;
@@ -542,7 +546,7 @@ function RankHistoryChart({ history }: { history: RankMatrixResult[] }) {
   );
 }
 
-function reportHref(basePath: string, filters: ClientReportData["filters"], keywordId?: string) {
+function reportHref(basePath: string, filters: ClientReportViewData["filters"], keywordId?: string) {
   const params = new URLSearchParams();
   if (filters.section !== "overview") params.set("section", filters.section);
   if (filters.period !== "90") params.set("period", filters.period);

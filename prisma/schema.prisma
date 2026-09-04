@@ -111,30 +111,52 @@ enum UserRole {
 }
 
 model UserAccess {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   name         String?
-  role         UserRole @default(team)
-  enabled      Boolean  @default(true)
+  role         UserRole  @default(team)
+  enabled      Boolean   @default(true)
   lastSignInAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([enabled, role])
 }
 
 model Client {
-  id             String    @id @default(cuid())
-  name           String
-  notes          String?
-  shareToken     String?   @unique
-  shareEnabled   Boolean   @default(false)
-  shareCreatedAt DateTime?
-  shareExpiresAt DateTime?
-  shareRevokedAt DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  projects       Project[]
+  id              String           @id @default(cuid())
+  name            String
+  notes           String?
+  shareToken      String?          @unique
+  shareEnabled    Boolean          @default(false)
+  shareCreatedAt  DateTime?
+  shareExpiresAt  DateTime?
+  shareRevokedAt  DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  projects        Project[]
+  reportSnapshots ReportSnapshot[]
+}
+
+model ReportSnapshot {
+  id              String         @id @default(cuid())
+  clientId        String
+  slug            String
+  token           String         @unique
+  modules         ReportModule[]
+  payload         Json
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdByEmail  String
+  accessCount     Int            @default(0)
+  firstAccessedAt DateTime?
+  lastAccessedAt  DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  client          Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model ReportRequest {
@@ -153,26 +175,26 @@ model ReportRequest {
 }
 
 model ReportExecution {
-  id              String                   @id @default(cuid())
+  id              String                @id @default(cuid())
   projectId       String
   periodStart     DateTime
   scheduledFor    DateTime
   modules         ReportModule[]
-  status          ReportExecutionStatus    @default(queued)
-  rankingsStatus  ReportModuleRunStatus    @default(not_selected)
-  gscStatus       ReportModuleRunStatus    @default(not_selected)
-  ga4Status       ReportModuleRunStatus    @default(not_selected)
-  rankRunId       String?                  @unique
+  status          ReportExecutionStatus @default(queued)
+  rankingsStatus  ReportModuleRunStatus @default(not_selected)
+  gscStatus       ReportModuleRunStatus @default(not_selected)
+  ga4Status       ReportModuleRunStatus @default(not_selected)
+  rankRunId       String?               @unique
   rankingsError   String?
   gscError        String?
   ga4Error        String?
-  gscRowsImported Int                      @default(0)
+  gscRowsImported Int                   @default(0)
   startedAt       DateTime?
   completedAt     DateTime?
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  project         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  rankRun         RankRun?                 @relation(fields: [rankRunId], references: [id], onDelete: SetNull)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rankRun         RankRun?              @relation(fields: [rankRunId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, periodStart])
   @@index([status, scheduledFor])
@@ -191,7 +213,7 @@ model Project {
   scheduleDevices                Device[]                       @default([desktop])
   scheduleSearchTypes            SearchType[]                   @default([organic])
   schedulePageLimit              Int                            @default(10)
-  reportModules                  ReportModule[]                  @default([rankings, maps, gsc])
+  reportModules                  ReportModule[]                 @default([rankings, maps, gsc])
   keywordMetricsStatus           KeywordMetricsStatus           @default(idle)
   keywordMetricsTaskId           String?
   keywordMetricsRequestedAt      DateTime?

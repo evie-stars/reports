@@ -182,6 +182,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
 }
 
 export type ClientReportData = NonNullable<Awaited<ReturnType<typeof getClientReportData>>>;
+export type ClientReportViewData = Omit<ClientReportData, "client">;
 export type CurrentReportResult = ClientReportData["latestResults"][number];
 
 function normalizeFilters(params: ReportSearchParams): ReportFilters {

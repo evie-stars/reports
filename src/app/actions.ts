@@ -14,6 +14,7 @@ import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/ra
 import { executeSandboxRankRun } from "@/lib/rank-runner";
 import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
 import { listSearchConsoleSites } from "@/lib/google-search-console";
+import { buildReportSnapshot, reportSnapshotSlug } from "@/lib/report-snapshot";
 import {
   actionRateLimit,
   enforceRateLimit,
@@ -91,6 +92,11 @@ const gscPropertySelectionSchema = z.object({
 
 const reportModulesSchema = z.object({
   reportModules: z.array(z.enum(["rankings", "maps", "gsc", "ga4"])).min(1, "Select at least one report section.")
+});
+
+const reportSnapshotSchema = z.object({
+  snapshotModules: z.array(z.enum(["rankings", "maps", "gsc"])).min(1, "Select at least one snapshot section."),
+  shareExpiryDays: z.coerce.number().int().refine((value) => [7, 30, 90, 365].includes(value), "Choose a valid link lifetime.")
 });
 
 const reportRequestSchema = z.object({
@@ -275,6 +281,80 @@ export async function regenerateClientShare(clientId: string, formData: FormData
   });
   await auditAction("client.share_regenerated", actor, "client", clientId, { expiresAt: expiresAt.toISOString() });
   revalidatePath(`/clients/${clientId}`);
+}
+
+export async function createReportSnapshot(clientId: string, formData: FormData) {
+  const actor = await guardedManagerAction("share", shareRateLimit());
+  const data = reportSnapshotSchema.parse({
+    snapshotModules: stringListFromForm(formData, "snapshotModules"),
+    shareExpiryDays: formData.get("shareExpiryDays")
+  });
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true, name: true } });
+  if (!client) throw new Error("Client not found.");
+
+  const payload = await buildReportSnapshot(client.id, data.snapshotModules);
+  const expiresAt = new Date(Date.now() + data.shareExpiryDays * 24 * 60 * 60 * 1000);
+  const snapshot = await prisma.reportSnapshot.create({
+    data: {
+      clientId: client.id,
+      slug: reportSnapshotSlug(client.name),
+      token: randomBytes(32).toString("base64url"),
+      modules: data.snapshotModules,
+      payload,
+      expiresAt,
+      createdByEmail: actor.email
+    }
+  });
+  await auditAction("report_snapshot.created", actor, "reportSnapshot", snapshot.id, {
+    clientId: client.id,
+    modules: data.snapshotModules,
+    expiresAt: expiresAt.toISOString()
+  });
+  revalidatePath(`/clients/${client.id}`);
+}
+
+export async function regenerateReportSnapshot(snapshotId: string, formData: FormData) {
+  const actor = await guardedManagerAction("share", shareRateLimit());
+  const snapshot = await prisma.reportSnapshot.findUnique({
+    where: { id: snapshotId },
+    include: { client: { select: { id: true, name: true } } }
+  });
+  if (!snapshot) throw new Error("Snapshot not found.");
+
+  const expiresAt = shareExpiry(formData);
+  const modules = snapshot.modules.filter((module): module is "rankings" | "maps" | "gsc" => module !== "ga4");
+  const payload = await buildReportSnapshot(snapshot.clientId, modules);
+  const [, replacement] = await prisma.$transaction([
+    prisma.reportSnapshot.update({ where: { id: snapshot.id }, data: { revokedAt: new Date() } }),
+    prisma.reportSnapshot.create({
+      data: {
+        clientId: snapshot.clientId,
+        slug: reportSnapshotSlug(snapshot.client.name),
+        token: randomBytes(32).toString("base64url"),
+        modules: snapshot.modules,
+        payload,
+        expiresAt,
+        createdByEmail: actor.email
+      }
+    })
+  ]);
+  await auditAction("report_snapshot.regenerated", actor, "reportSnapshot", replacement.id, {
+    clientId: snapshot.clientId,
+    modules,
+    expiresAt: expiresAt.toISOString(),
+    replacedSnapshotId: snapshot.id
+  });
+  revalidatePath(`/clients/${snapshot.clientId}`);
+}
+
+export async function revokeReportSnapshot(snapshotId: string) {
+  const actor = await guardedManagerAction("share", shareRateLimit());
+  const snapshot = await prisma.reportSnapshot.findUnique({ where: { id: snapshotId }, select: { id: true, clientId: true } });
+  if (!snapshot) throw new Error("Snapshot not found.");
+
+  await prisma.reportSnapshot.update({ where: { id: snapshot.id }, data: { revokedAt: new Date() } });
+  await auditAction("report_snapshot.revoked", actor, "reportSnapshot", snapshot.id, { clientId: snapshot.clientId });
+  revalidatePath(`/clients/${snapshot.clientId}`);
 }
 
 export async function createProject(formData: FormData) {
