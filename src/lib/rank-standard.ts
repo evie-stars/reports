@@ -1,16 +1,30 @@
 import { Prisma, type RankTask, type SearchType } from "@prisma/client";
 import { DataForSeoClient, type DataForSeoApiResponse, type DataForSeoTask } from "@/lib/dataforseo";
-import { prisma } from "@/lib/db";
-import { writeAuditLog } from "@/lib/audit";
 import {
-  buildDataForSeoTask,
+  asRecord,
+  buildDataForSeoTag,
+  errorMessage,
   getDataForSeoError,
-  storeRankResultFromResponse,
-  type RankRunSelection
-} from "@/lib/rank-runner";
+  readPostedTasks,
+  readRootError,
+  readTaskState,
+  reconcilePostedTasks,
+  stringValue
+} from "@/lib/dataforseo-response";
+import { prisma } from "@/lib/db";
+import { configuredPositiveInteger } from "@/lib/env";
+import { writeAuditLog } from "@/lib/audit";
+import { buildDataForSeoTask, storeRankResultFromResponse, type RankRunSelection } from "@/lib/rank-runner";
 
 const TASK_BATCH_SIZE = 100;
+const INTERRUPTED_SUBMISSION = "Submission was interrupted before DataForSEO confirmed the task. Retry the report to resubmit it.";
 
+/**
+ * Materialise one RankTask per keyword, area, device and result type, then post them to
+ * DataForSEO in batches. When the run already has tasks (a resumed or retried run) only the
+ * tasks still marked `queued` are posted, so nothing that DataForSEO already accepted is paid
+ * for twice.
+ */
 export async function submitStandardRankRun(
   runId: string,
   selection: RankRunSelection,
@@ -33,67 +47,69 @@ export async function submitStandardRankRun(
   client.assertStandardTaskCount(requestedTasks);
 
   const existingTasks = await prisma.rankTask.count({ where: { runId } });
-  if (existingTasks > 0) return refreshStandardRun(runId);
-
-  const taskInputs = project.keywords.flatMap((keyword) =>
-    project.locations.flatMap((location) =>
-      selection.devices.flatMap((device) =>
-        selection.searchTypes.map((searchType) => {
-          const tag = buildStandardTag(project.clientId, project.id, runId, keyword.id, location.id, searchType, device);
-          const requestBody = buildDataForSeoTask(
-            keyword.phrase,
-            project.domain,
-            location,
-            device,
-            searchType,
-            "live",
-            pageLimit,
-            tag
-          );
-          return { keywordId: keyword.id, locationId: location.id, device, searchType, requestBody };
-        })
+  if (existingTasks === 0) {
+    const taskInputs = project.keywords.flatMap((keyword) =>
+      project.locations.flatMap((location) =>
+        selection.devices.flatMap((device) =>
+          selection.searchTypes.map((searchType) => {
+            const tag = buildDataForSeoTag(project.clientId, project.id, runId, keyword.id, location.id, searchType, device);
+            const requestBody = buildDataForSeoTask(keyword.phrase, project.domain, location, device, searchType, "live", pageLimit, tag);
+            return { keywordId: keyword.id, locationId: location.id, device, searchType, requestBody };
+          })
+        )
       )
-    )
-  );
+    );
 
-  await prisma.$transaction([
-    prisma.rankRun.update({
-      where: { id: runId },
-      data: {
-        status: "running",
-        deliveryMethod: "standard",
-        startedAt: new Date(),
-        requestedTasks,
-        submittedTasks: 0,
-        completedTasks: 0,
-        failedTasks: 0,
-        lastError: null
-      }
-    }),
-    prisma.rankTask.createMany({
-      data: taskInputs.map((task) => ({
-        runId,
-        keywordId: task.keywordId,
-        locationId: task.locationId,
-        device: task.device,
-        searchType: task.searchType,
-        requestBody: task.requestBody as Prisma.InputJsonValue
-      }))
-    })
-  ]);
-
-  const storedTasks = await prisma.rankTask.findMany({ where: { runId }, orderBy: { createdAt: "asc" } });
-  for (const searchType of selection.searchTypes) {
-    const typedTasks = storedTasks.filter((task) => task.searchType === searchType);
-    for (let offset = 0; offset < typedTasks.length; offset += TASK_BATCH_SIZE) {
-      await submitBatch(runId, searchType, typedTasks.slice(offset, offset + TASK_BATCH_SIZE), client);
-    }
+    await prisma.$transaction([
+      prisma.rankRun.update({
+        where: { id: runId },
+        data: {
+          status: "running",
+          deliveryMethod: "standard",
+          startedAt: new Date(),
+          requestedTasks,
+          submittedTasks: 0,
+          completedTasks: 0,
+          failedTasks: 0,
+          lastError: null
+        }
+      }),
+      prisma.rankTask.createMany({
+        data: taskInputs.map((task) => ({
+          runId,
+          keywordId: task.keywordId,
+          locationId: task.locationId,
+          device: task.device,
+          searchType: task.searchType,
+          requestBody: task.requestBody as Prisma.InputJsonValue
+        }))
+      })
+    ]);
   }
 
+  await submitQueuedTasks(runId, client);
   return refreshStandardRun(runId);
 }
 
+/** Post every task on the run that is still `queued`, batched per result type. */
+export async function submitQueuedTasks(runId: string, client = new DataForSeoClient()) {
+  const queued = await prisma.rankTask.findMany({ where: { runId, status: "queued" }, orderBy: { createdAt: "asc" } });
+  const bySearchType = new Map<SearchType, RankTask[]>();
+  for (const task of queued) {
+    bySearchType.set(task.searchType, [...(bySearchType.get(task.searchType) ?? []), task]);
+  }
+
+  let submitted = 0;
+  for (const [searchType, tasks] of bySearchType) {
+    for (let offset = 0; offset < tasks.length; offset += TASK_BATCH_SIZE) {
+      submitted += await submitBatch(runId, searchType, tasks.slice(offset, offset + TASK_BATCH_SIZE), client);
+    }
+  }
+  return submitted;
+}
+
 export async function collectStandardRankRuns(client = new DataForSeoClient()) {
+  const maxPollAttempts = configuredPositiveInteger("RANK_QUEUE_MAX_POLL_ATTEMPTS", 24);
   const runs = await prisma.rankRun.findMany({
     where: {
       status: "running",
@@ -101,13 +117,13 @@ export async function collectStandardRankRuns(client = new DataForSeoClient()) {
       OR: [{ nextPollAt: null }, { nextPollAt: { lte: new Date() } }]
     },
     orderBy: { startedAt: "asc" },
-    take: configuredInteger("RANK_QUEUE_MAX_COLLECT_RUNS", 3),
+    take: configuredPositiveInteger("RANK_QUEUE_MAX_COLLECT_RUNS", 3),
     include: {
       project: true,
       rankTasks: {
         where: { status: "submitted" },
         orderBy: { submittedAt: "asc" },
-        take: configuredInteger("RANK_QUEUE_MAX_TASK_GETS", 100)
+        take: configuredPositiveInteger("RANK_QUEUE_MAX_TASK_GETS", 100)
       }
     }
   });
@@ -123,7 +139,7 @@ export async function collectStandardRankRuns(client = new DataForSeoClient()) {
 
         if (state.kind === "pending") {
           const attempts = task.attempts + 1;
-          const exhausted = attempts >= configuredInteger("RANK_QUEUE_MAX_POLL_ATTEMPTS", 24);
+          const exhausted = attempts >= maxPollAttempts;
           await prisma.rankTask.update({
             where: { id: task.id },
             data: exhausted
@@ -158,12 +174,12 @@ export async function collectStandardRankRuns(client = new DataForSeoClient()) {
         collected += 1;
       } catch (error) {
         const attempts = task.attempts + 1;
-        const exhausted = attempts >= configuredInteger("RANK_QUEUE_MAX_POLL_ATTEMPTS", 24);
+        const exhausted = attempts >= maxPollAttempts;
         await prisma.rankTask.update({
           where: { id: task.id },
           data: exhausted
-            ? { status: "failed", attempts, completedAt: new Date(), lastError: errorMessage(error) }
-            : { status: "submitted", attempts, lastError: errorMessage(error) }
+            ? { status: "failed", attempts, completedAt: new Date(), lastError: taskErrorMessage(error) }
+            : { status: "submitted", attempts, lastError: taskErrorMessage(error) }
         });
       }
     }
@@ -172,46 +188,98 @@ export async function collectStandardRankRuns(client = new DataForSeoClient()) {
   return collected;
 }
 
-async function submitBatch(
-  runId: string,
-  searchType: SearchType,
-  tasks: RankTask[],
-  client: DataForSeoClient
-) {
+/**
+ * Tasks left in `submitting` mean the worker died between claiming them and recording
+ * DataForSEO's answer. We cannot tell whether DataForSEO accepted (and charged for) them, so
+ * they are failed rather than re-posted; an operator can retry the run once the cause is known.
+ */
+export async function reapStalledStandardTasks(now = new Date()) {
+  const stalled = await prisma.rankTask.findMany({
+    where: { status: "submitting", updatedAt: { lt: staleCutoff(now) } },
+    select: { id: true, runId: true }
+  });
+  if (stalled.length === 0) return 0;
+
+  await prisma.rankTask.updateMany({
+    where: { id: { in: stalled.map((task) => task.id) } },
+    data: { status: "failed", completedAt: now, lastError: INTERRUPTED_SUBMISSION }
+  });
+  for (const runId of new Set(stalled.map((task) => task.runId))) {
+    await refreshStandardRun(runId);
+    await writeAuditLog({
+      event: "report.tasks_reaped",
+      outcome: "failure",
+      actorEmail: "system",
+      actorRole: "system",
+      entityType: "rankRun",
+      entityId: runId,
+      metadata: { reaped: stalled.filter((task) => task.runId === runId).length }
+    });
+  }
+  return stalled.length;
+}
+
+/**
+ * Runs still `running` whose tasks were never posted: the worker died after creating the
+ * tasks but before submitting them. Those tasks were never sent, so posting them is safe.
+ */
+export async function resumeStalledStandardRuns(client = new DataForSeoClient(), now = new Date()) {
+  const runs = await prisma.rankRun.findMany({
+    where: {
+      status: "running",
+      deliveryMethod: "standard",
+      rankTasks: { some: { status: "queued", updatedAt: { lt: staleCutoff(now) } } }
+    },
+    select: { id: true },
+    take: configuredPositiveInteger("RANK_QUEUE_MAX_COLLECT_RUNS", 3)
+  });
+
+  let resumed = 0;
+  for (const run of runs) {
+    resumed += await submitQueuedTasks(run.id, client);
+    await refreshStandardRun(run.id);
+  }
+  return resumed;
+}
+
+async function submitBatch(runId: string, searchType: SearchType, tasks: RankTask[], client: DataForSeoClient) {
   const ids = tasks.map((task) => task.id);
-  await prisma.rankTask.updateMany({ where: { id: { in: ids }, status: "queued" }, data: { status: "submitting" } });
+  const claimed = await prisma.rankTask.updateMany({ where: { id: { in: ids }, status: "queued" }, data: { status: "submitting" } });
+  if (claimed.count === 0) return 0;
 
+  const taggedTasks = tasks.map((task) => ({ ...task, tag: taskTag(task) }));
   try {
-    const payload = tasks.map((task) => task.requestBody as DataForSeoTask);
-    const response = await client.postStandardSerpTasks(searchType, payload);
+    const response = await client.postStandardSerpTasks(searchType, taggedTasks.map((task) => task.requestBody as DataForSeoTask));
     await logApiResponse(runId, response, `submit:${searchType}`);
-    const rootError = getDataForSeoError(response.responseBody, response.statusCode);
-    const posted = readPostedTasks(response.responseBody);
 
-    for (const [index, task] of tasks.entries()) {
-      const result = posted[index];
-      const failure = rootError ?? result?.error ?? (!result?.id ? "DataForSEO did not return a task ID." : null);
+    const reconciled = reconcilePostedTasks(
+      taggedTasks,
+      readPostedTasks(response.responseBody),
+      readRootError(response.responseBody, response.statusCode)
+    );
+    let submitted = 0;
+    for (const item of reconciled) {
       await prisma.rankTask.update({
-        where: { id: task.id },
-        data: failure
-          ? { status: "failed", completedAt: new Date(), lastError: failure }
-          : { status: "submitted", externalTaskId: result.id, submittedAt: new Date(), lastError: null }
+        where: { id: item.task.id },
+        data: item.failure
+          ? { status: "failed", completedAt: new Date(), lastError: item.failure }
+          : { status: "submitted", externalTaskId: item.externalTaskId, submittedAt: new Date(), lastError: null }
       });
+      if (!item.failure) submitted += 1;
     }
 
-    await prisma.rankRun.update({
-      where: { id: runId },
-      data: { actualCostUsd: { increment: response.costUsd } }
-    });
+    await prisma.rankRun.update({ where: { id: runId }, data: { actualCostUsd: { increment: response.costUsd } } });
+    return submitted;
   } catch (error) {
     await prisma.rankTask.updateMany({
       where: { id: { in: ids }, status: "submitting" },
-      data: { status: "failed", completedAt: new Date(), lastError: errorMessage(error) }
+      data: { status: "failed", completedAt: new Date(), lastError: taskErrorMessage(error) }
     });
+    return 0;
   }
 }
 
-async function refreshStandardRun(runId: string) {
+export async function refreshStandardRun(runId: string) {
   const counts = await prisma.rankTask.groupBy({ where: { runId }, by: ["status"], _count: { _all: true } });
   const count = (status: string) => counts.find((item) => item.status === status)?._count._all ?? 0;
   const submittedTasks = count("submitted");
@@ -225,6 +293,7 @@ async function refreshStandardRun(runId: string) {
     orderBy: { updatedAt: "desc" },
     select: { lastError: true }
   });
+  const pollIntervalMs = configuredPositiveInteger("RANK_QUEUE_POLL_INTERVAL_MINUTES", 4) * 60 * 1000;
 
   await prisma.rankRun.update({
     where: { id: runId },
@@ -234,7 +303,7 @@ async function refreshStandardRun(runId: string) {
       completedTasks,
       failedTasks,
       lastError: lastFailure?.lastError ?? null,
-      nextPollAt: done ? null : new Date(Date.now() + 4 * 60 * 1000),
+      nextPollAt: done ? null : new Date(Date.now() + pollIntervalMs),
       ...(done ? { completedAt: new Date() } : {})
     }
   });
@@ -268,65 +337,14 @@ async function logApiResponse(runId: string, response: DataForSeoApiResponse, ta
   });
 }
 
-function readPostedTasks(body: unknown) {
-  const tasks = record(body)?.tasks;
-  if (!Array.isArray(tasks)) return [];
-  return tasks.map((task) => {
-    const item = record(task);
-    const code = numberValue(item?.status_code);
-    return {
-      id: stringValue(item?.id),
-      error: code && code >= 40000 ? stringValue(item?.status_message) ?? `DataForSEO status ${code}.` : null
-    };
-  });
+function taskTag(task: RankTask) {
+  return stringValue(asRecord(task.requestBody)?.tag) ?? "";
 }
 
-export function readTaskState(body: unknown, statusCode: number):
-  | { kind: "pending"; message: string }
-  | { kind: "failed"; message: string }
-  | { kind: "ready" } {
-  if (statusCode >= 400) return { kind: "failed", message: `HTTP ${statusCode} returned by DataForSEO.` };
-  const root = record(body);
-  const rootCode = numberValue(root?.status_code);
-  if (rootCode && rootCode >= 40000) {
-    return { kind: "failed", message: stringValue(root?.status_message) ?? `DataForSEO status ${rootCode}.` };
-  }
-  const tasks = root?.tasks;
-  const item = Array.isArray(tasks) ? record(tasks[0]) : undefined;
-  const code = numberValue(item?.status_code);
-  if (code === 40601 || code === 40602) {
-    return { kind: "pending", message: stringValue(item?.status_message) ?? "Waiting for DataForSEO." };
-  }
-  if (code && code >= 40000) {
-    return { kind: "failed", message: stringValue(item?.status_message) ?? `DataForSEO status ${code}.` };
-  }
-  if (item?.result === null || item?.result === undefined) {
-    return { kind: "pending", message: stringValue(item?.status_message) ?? "Waiting for DataForSEO." };
-  }
-  return { kind: "ready" };
+function staleCutoff(now: Date) {
+  return new Date(now.getTime() - configuredPositiveInteger("RANK_TASK_STALE_MINUTES", 30) * 60 * 1000);
 }
 
-function buildStandardTag(...parts: Array<string>) {
-  return parts.map((part) => part.replace(/[^a-zA-Z0-9_-]/g, "-")).join(":").slice(0, 255);
-}
-
-function configuredInteger(name: string, fallback: number) {
-  const value = Number.parseInt(process.env[name] ?? "", 10);
-  return Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberValue(value: unknown) {
-  return typeof value === "number" ? value : undefined;
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown Standard task failure.";
+function taskErrorMessage(error: unknown) {
+  return errorMessage(error, "Unknown Standard task failure.");
 }

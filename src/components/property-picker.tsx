@@ -17,12 +17,15 @@ export function PropertyPicker({
   }, [options, query]);
 
   return (
-    <div className="property-picker">
-      <label>
-        Find property
-        <span className="search-field property-search">
-          <Icon name="search" />
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label className="block">
+        <span className="field-label">Find property</span>
+        <span className="relative block">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate pointer-events-none">
+            <Icon name="search" className="w-4 h-4" />
+          </span>
           <input
+            className="field pl-9"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search by domain or account"
             type="search"
@@ -30,14 +33,16 @@ export function PropertyPicker({
           />
         </span>
       </label>
-      <label>
-        Search Console property
-        <select name="gscProperty" required defaultValue={defaultValue}>
+      <label className="block">
+        <span className="field-label">Search Console property</span>
+        <select name="gscProperty" required defaultValue={defaultValue} className="field">
           <option value="" disabled>Select a property</option>
           {filteredOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       </label>
-      <small aria-live="polite">{filteredOptions.length} matching propert{filteredOptions.length === 1 ? "y" : "ies"}</small>
+      <p className="text-xs text-slate sm:col-span-2" aria-live="polite">
+        {filteredOptions.length} matching propert{filteredOptions.length === 1 ? "y" : "ies"}
+      </p>
     </div>
   );
 }

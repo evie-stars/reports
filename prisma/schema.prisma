@@ -244,9 +244,12 @@ model Project {
   rankRuns                       RankRun[]
   gscSnapshots                   GscSnapshot[]
   reportExecutions               ReportExecution[]
+  ga4Snapshots                   Ga4Snapshot[]
 
   @@index([clientId])
   @@index([gscConnectionId])
+  @@index([scheduleEnabled, scheduleDay])
+  @@index([keywordMetricsStatus, keywordMetricsNextPollAt])
 }
 
 model GoogleSearchConsoleConnection {
@@ -282,6 +285,7 @@ model Keyword {
   rankTasks        RankTask[]
   metricSnapshots  KeywordMetricSnapshot[]
 
+  @@unique([projectId, phrase])
   @@index([projectId, active])
 }
 
@@ -302,6 +306,7 @@ model Location {
   rankTasks              RankTask[]
 
   @@index([projectId, active])
+  @@index([projectId, name])
 }
 
 model Competitor {
@@ -346,6 +351,7 @@ model RankRun {
 
   @@index([projectId, createdAt])
   @@index([status, availableAt, createdAt])
+  @@index([status, deliveryMethod, nextPollAt])
 }
 
 model RankTask {
@@ -370,6 +376,8 @@ model RankTask {
 
   @@index([runId, status])
   @@index([status, updatedAt])
+  @@index([keywordId])
+  @@index([locationId])
 }
 
 model KeywordMetricSnapshot {
@@ -462,8 +470,10 @@ model RankResult {
   location     Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
   serpFeatures SerpFeature[]
 
+  @@unique([runId, keywordId, locationId, searchType, device])
   @@index([keywordId, locationId, searchType, device, checkedAt])
   @@index([runId])
+  @@index([locationId])
 }
 
 model SerpFeature {
@@ -477,7 +487,7 @@ model SerpFeature {
   rawItem      Json?
   rankResult   RankResult @relation(fields: [rankResultId], references: [id], onDelete: Cascade)
 
-  @@index([type])
+  @@index([rankResultId, type])
 }
 
 model ApiRequest {
@@ -496,6 +506,8 @@ model ApiRequest {
   rankRun      RankRun? @relation(fields: [rankRunId], references: [id], onDelete: SetNull)
 
   @@index([provider, createdAt])
+  @@index([provider, sandbox, createdAt])
+  @@index([rankRunId, createdAt])
 }
 
 model GscSnapshot {
@@ -529,6 +541,7 @@ model Ga4Snapshot {
   conversions Float    @default(0)
   rawData     Json?
   createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, date])
 }

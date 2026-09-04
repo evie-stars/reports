@@ -1,7 +1,9 @@
-import { Device, Prisma, RankDirection, SearchType } from "@prisma/client";
+import { Device, Prisma, SearchType } from "@prisma/client";
 import { DataForSeoClient, DataForSeoMode, DataForSeoTask } from "@/lib/dataforseo";
+import { buildDataForSeoTag, errorMessage, getDataForSeoError, movementDirection } from "@/lib/dataforseo-response";
 import { estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
+import { configuredPositiveInteger } from "@/lib/env";
 import { MAX_SANDBOX_TASKS } from "@/lib/rank-config";
 import { parseDataForSeoItems, ParsedRankItem } from "@/lib/rank-parser";
 
@@ -19,27 +21,6 @@ export async function executeSandboxRankRun(selection: SandboxRunSelection) {
   return executeRankRun(selection, "sandbox", 1);
 }
 
-export async function executeLiveRankRun(selection: {
-  projectId: string;
-  keywordId: string;
-  locationId: string;
-  device: Device;
-  searchType: SearchType;
-  pageLimit: number;
-}) {
-  return executeRankRun(
-    {
-      projectId: selection.projectId,
-      keywordIds: [selection.keywordId],
-      locationIds: [selection.locationId],
-      devices: [selection.device],
-      searchTypes: [selection.searchType]
-    },
-    "live",
-    selection.pageLimit
-  );
-}
-
 export async function executeQueuedRankRun(runId: string, selection: RankRunSelection, pageLimit: number) {
   return executeRankRun(selection, "live", pageLimit, runId);
 }
@@ -53,14 +34,8 @@ async function executeRankRun(
   const project = await prisma.project.findUnique({
     where: { id: selection.projectId },
     include: {
-      keywords: {
-        where: { id: { in: selection.keywordIds }, active: true },
-        orderBy: { phrase: "asc" }
-      },
-      locations: {
-        where: { id: { in: selection.locationIds }, active: true },
-        orderBy: { name: "asc" }
-      }
+      keywords: { where: { id: { in: selection.keywordIds }, active: true }, orderBy: { phrase: "asc" } },
+      locations: { where: { id: { in: selection.locationIds }, active: true }, orderBy: { name: "asc" } }
     }
   });
 
@@ -76,11 +51,9 @@ async function executeRankRun(
   if (mode === "sandbox" && requestedTasks > MAX_SANDBOX_TASKS) {
     throw new Error(`Sandbox batch limited to ${MAX_SANDBOX_TASKS} tasks. Reduce the selection and run another batch.`);
   }
-
   if (mode === "live" && (!Number.isInteger(livePageLimit) || livePageLimit < 1 || livePageLimit > 10)) {
     throw new Error("Live page depth must be between 1 and 10 pages.");
   }
-
   if (mode === "live" && project.keywords.some((keyword) => hasCostMultiplyingOperator(keyword.phrase))) {
     throw new Error("This keyword contains a search operator that can multiply DataForSEO cost. Use a plain keyword for the first live test.");
   }
@@ -97,8 +70,8 @@ async function executeRankRun(
       }, "live")
     : 0;
   const modeLabel = mode === "sandbox" ? "Sandbox" : existingRunId ? "Queued live report" : "Live verification";
-
   const runNotes = `${modeLabel}: ${project.keywords.length} keyword(s), ${project.locations.length} location(s), ${selection.devices.length} device(s), ${selection.searchTypes.length} result type(s)${mode === "live" ? `, up to ${livePageLimit} organic result page(s)` : ""}.`;
+
   const run = existingRunId
     ? await prisma.rankRun.update({
         where: { id: existingRunId },
@@ -142,7 +115,6 @@ async function executeRankRun(
           try {
             const response = await client.postSerpTask(searchType, task, mode);
             const responseError = getDataForSeoError(response.responseBody, response.statusCode);
-
             const apiRequest = await prisma.apiRequest.create({
               data: {
                 rankRunId: run.id,
@@ -157,7 +129,6 @@ async function executeRankRun(
               }
             });
             apiRequestId = apiRequest.id;
-
             totalCostUsd += response.costUsd;
 
             if (responseError) {
@@ -176,14 +147,13 @@ async function executeRankRun(
               targetBusinessName: project.targetBusinessName,
               responseBody: response.responseBody
             });
-
             completedTasks += 1;
           } catch (error) {
             failedTasks += 1;
             if (apiRequestId) {
               await prisma.apiRequest.update({
                 where: { id: apiRequestId },
-                data: { errorMessage: `Result storage failed: ${errorMessage(error)}` }
+                data: { errorMessage: `Result storage failed: ${errorMessage(error, "Unknown rank request failure.")}` }
               });
             } else {
               await prisma.apiRequest.create({
@@ -193,7 +163,7 @@ async function executeRankRun(
                   tag,
                   sandbox: mode === "sandbox",
                   requestBody: [task] as Prisma.InputJsonValue,
-                  errorMessage: errorMessage(error)
+                  errorMessage: errorMessage(error, "Unknown rank request failure.")
                 }
               });
             }
@@ -223,6 +193,11 @@ async function executeRankRun(
   return run.id;
 }
 
+/**
+ * Store one result row per run, keyword, area, result type, and device. The database enforces
+ * that combination as unique, so a concurrent collector storing the same task simply returns
+ * the row that won instead of creating a duplicate.
+ */
 export async function storeRankResultFromResponse(input: {
   runId: string;
   keywordId: string;
@@ -233,14 +208,15 @@ export async function storeRankResultFromResponse(input: {
   targetBusinessName: string | null;
   responseBody: unknown;
 }) {
-  const existing = await prisma.rankResult.findFirst({
-    where: {
-      runId: input.runId,
-      keywordId: input.keywordId,
-      locationId: input.locationId,
-      searchType: input.searchType,
-      device: input.device
-    },
+  const identity = {
+    runId: input.runId,
+    keywordId: input.keywordId,
+    locationId: input.locationId,
+    searchType: input.searchType,
+    device: input.device
+  };
+  const existing = await prisma.rankResult.findUnique({
+    where: { runId_keywordId_locationId_searchType_device: identity },
     select: { id: true }
   });
   if (existing) return existing.id;
@@ -254,43 +230,49 @@ export async function storeRankResultFromResponse(input: {
   const previousRank = previousResult?.rankAbsolute ?? previousResult?.rankGroup ?? null;
   const currentRank = matchedItem?.rankAbsolute ?? matchedItem?.rankGroup ?? null;
 
-  const result = await prisma.rankResult.create({
-    data: {
-      runId: input.runId,
-      keywordId: input.keywordId,
-      locationId: input.locationId,
-      searchType: input.searchType,
-      device: input.device,
-      rankGroup: matchedItem?.rankGroup,
-      rankAbsolute: matchedItem?.rankAbsolute,
-      matched: Boolean(matchedItem),
-      matchedName: matchedItem?.title,
-      matchedUrl: matchedItem?.url,
-      resultTitle: matchedItem?.title,
-      resultUrl: matchedItem?.url,
-      resultDomain: matchedItem?.domain,
-      direction: getDirection(currentRank, previousRank),
-      previousRank,
-      ...(matchedItem ? { rawItem: matchedItem.rawItem as Prisma.InputJsonValue } : {}),
-      serpFeatures: {
-        create: getStoredItems(parsedItems, matchedItem, input.searchType).map((item) => ({
-          type: item.storedType,
-          title: item.title,
-          url: item.url,
-          rankGroup: item.rankGroup,
-          rankAbsolute: item.rankAbsolute,
-          rawItem: item.rawItem as Prisma.InputJsonValue
-        }))
+  try {
+    const result = await prisma.rankResult.create({
+      data: {
+        ...identity,
+        rankGroup: matchedItem?.rankGroup,
+        rankAbsolute: matchedItem?.rankAbsolute,
+        matched: Boolean(matchedItem),
+        matchedName: matchedItem?.title,
+        matchedUrl: matchedItem?.url,
+        resultTitle: matchedItem?.title,
+        resultUrl: matchedItem?.url,
+        resultDomain: matchedItem?.domain,
+        direction: movementDirection(currentRank, previousRank),
+        previousRank,
+        ...(matchedItem ? { rawItem: matchedItem.rawItem as Prisma.InputJsonValue } : {}),
+        serpFeatures: {
+          create: getStoredItems(parsedItems, matchedItem, input.searchType).map((item) => ({
+            type: item.storedType,
+            title: item.title,
+            url: item.url,
+            rankGroup: item.rankGroup,
+            rankAbsolute: item.rankAbsolute,
+            rawItem: item.rawItem as Prisma.InputJsonValue
+          }))
+        }
       }
+    });
+    return result.id;
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const winner = await prisma.rankResult.findUnique({
+        where: { runId_keywordId_locationId_searchType_device: identity },
+        select: { id: true }
+      });
+      if (winner) return winner.id;
     }
-  });
-  return result.id;
+    throw error;
+  }
 }
 
 async function pauseBetweenTasks() {
-  const configured = Number.parseInt(process.env.RANK_QUEUE_DELAY_MS ?? "750", 10);
-  const milliseconds = Number.isFinite(configured) ? Math.max(0, Math.min(configured, 30_000)) : 750;
-  if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds));
+  const milliseconds = Math.min(configuredPositiveInteger("RANK_QUEUE_DELAY_MS", 750), 30_000);
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function buildDataForSeoTask(
@@ -319,12 +301,7 @@ export function buildDataForSeoTask(
     ? {
         depth: livePageLimit * 10,
         max_crawl_pages: livePageLimit,
-        stop_crawl_on_match: [
-          {
-            match_value: normalizeMatchDomain(targetDomain),
-            match_type: "with_subdomains" as const
-          }
-        ],
+        stop_crawl_on_match: [{ match_value: normalizeMatchDomain(targetDomain), match_type: "with_subdomains" as const }],
         find_targets_in: ["organic"]
       }
     : { depth: getDepth(searchType, device, mode) };
@@ -380,65 +357,9 @@ function getStoredItems(items: ParsedRankItem[], bestMatch: ParsedRankItem | und
   const additionalTargets = items
     .filter((item) => item.matched && item.url && item.url !== bestMatch?.url)
     .map((item) => ({ ...item, storedType: "target_match" }));
-
   return [...serpFeatures, ...additionalTargets].slice(0, 50);
 }
 
-function getDirection(currentRank: number | null, previousRank: number | null): RankDirection | null {
-  if (currentRank === null && previousRank === null) return null;
-  if (currentRank === null) return "lost";
-  if (previousRank === null) return "new";
-  if (currentRank < previousRank) return "up";
-  if (currentRank > previousRank) return "down";
-  return "unchanged";
-}
-
-export function getDataForSeoError(responseBody: unknown, statusCode: number) {
-  if (statusCode >= 400) return `HTTP ${statusCode} returned by DataForSEO.`;
-  const body = asRecord(responseBody);
-  const rootCode = numberValue(body?.status_code);
-  if (rootCode && rootCode >= 40000) return stringValue(body?.status_message) ?? `DataForSEO status ${rootCode}.`;
-
-  const tasks = body?.tasks;
-  if (!Array.isArray(tasks)) return null;
-
-  for (const task of tasks) {
-    const taskRecord = asRecord(task);
-    const taskCode = numberValue(taskRecord?.status_code);
-    if (taskCode === 40601 || taskCode === 40602) continue;
-    if (taskCode && taskCode >= 40000) {
-      return stringValue(taskRecord?.status_message) ?? `DataForSEO task status ${taskCode}.`;
-    }
-  }
-
-  return null;
-}
-
-function buildDataForSeoTag(
-  clientId: string,
-  projectId: string,
-  runId: string,
-  searchType: SearchType,
-  device: Device
-) {
-  return [clientId, projectId, runId, searchType, device]
-    .map((part) => part.replace(/[^a-zA-Z0-9_-]/g, "-"))
-    .join(":")
-    .slice(0, 255);
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown rank request failure.";
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberValue(value: unknown) {
-  return typeof value === "number" ? value : undefined;
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

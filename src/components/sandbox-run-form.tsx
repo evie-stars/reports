@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
-import { runSandboxCheck } from "@/app/actions";
+import { runSandboxCheck } from "@/actions/reports";
 import { Icon } from "@/components/icon";
+import { StatusPill } from "@/components/ui/status-pill";
+import { plural } from "@/lib/format";
 import { MAX_SANDBOX_TASKS } from "@/lib/rank-config";
 
 type Choice = { id: string; label: string };
@@ -24,22 +26,26 @@ export function SandboxRunForm({
   const [devices, setDevices] = useState(["desktop"]);
   const [searchTypes, setSearchTypes] = useState(["organic"]);
   const taskCount = keywordIds.length * locationIds.length * devices.length * searchTypes.length;
-  const ready = credentialsConfigured && taskCount > 0 && taskCount <= MAX_SANDBOX_TASKS;
+  const overLimit = taskCount > MAX_SANDBOX_TASKS;
+  const ready = credentialsConfigured && taskCount > 0 && !overLimit;
   const runSandboxCheckForProject = runSandboxCheck.bind(null, projectId);
 
   return (
-    <form className="card sandbox-run" action={runSandboxCheckForProject}>
-      <div className="sandbox-run-header">
-        <div>
-          <p className="label label-with-icon"><Icon name="graph" />Sandbox Rank Check</p>
-          <h3>Test and store ranking results</h3>
+    <form className="card flex flex-col gap-4" action={runSandboxCheckForProject}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-display text-base flex items-center gap-2">
+            <Icon name="refresh" className="w-4 h-4 text-slate shrink-0" />
+            <span className="truncate">Sandbox rank check</span>
+          </h3>
+          <p className="text-xs text-slate mt-0.5">Test and store ranking results</p>
         </div>
-        <span className={`status ${credentialsConfigured ? "good" : "danger"}`}>
+        <StatusPill tone={credentialsConfigured ? "accent" : "blocked"} className="shrink-0">
           {credentialsConfigured ? "Sandbox protected" : "Credentials missing"}
-        </span>
+        </StatusPill>
       </div>
 
-      <div className="sandbox-options">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <ChoiceGroup
           legend="Keywords"
           name="keywordIds"
@@ -78,15 +84,15 @@ export function SandboxRunForm({
         />
       </div>
 
-      <div className="sandbox-run-footer">
-        <div>
-          <strong>{taskCount} sandbox task{taskCount === 1 ? "" : "s"}</strong>
-          <span className={taskCount > MAX_SANDBOX_TASKS ? "danger-text" : "muted"}>
-            {taskCount > MAX_SANDBOX_TASKS
-              ? ` Reduce the selection to ${MAX_SANDBOX_TASKS} tasks or fewer.`
-              : " Sandbox requests do not use live trial credit."}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-line">
+        <p className="text-sm min-w-0">
+          <span className="font-medium text-ink">{plural(taskCount, "sandbox task")}</span>
+          <span className={`block text-xs ${overLimit ? "text-blocked" : "text-slate"}`}>
+            {overLimit
+              ? `Reduce the selection to ${MAX_SANDBOX_TASKS} tasks or fewer.`
+              : "Sandbox requests do not use live trial credit."}
           </span>
-        </div>
+        </p>
         <SandboxSubmit disabled={!ready} />
       </div>
     </form>
@@ -113,11 +119,11 @@ function ChoiceGroup({
   }
 
   return (
-    <fieldset className="choice-group">
-      <legend>{legend}</legend>
-      <div className="choice-list">
+    <fieldset className="min-w-0">
+      <legend className="field-label">{legend}</legend>
+      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
         {choices.map((choice) => (
-          <label key={choice.id}>
+          <label key={choice.id} className="choice">
             <input
               type="checkbox"
               name={name}
@@ -125,10 +131,10 @@ function ChoiceGroup({
               checked={selected.includes(choice.id)}
               onChange={() => toggle(choice.id)}
             />
-            <span>{choice.label}</span>
+            <span className="truncate">{choice.label}</span>
           </label>
         ))}
-        {choices.length === 0 ? <span className="muted choice-empty">{emptyText}</span> : null}
+        {choices.length === 0 ? <span className="text-xs text-slate">{emptyText}</span> : null}
       </div>
     </fieldset>
   );
@@ -137,8 +143,9 @@ function ChoiceGroup({
 function SandboxSubmit({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <button className="button" type="submit" disabled={disabled || pending}>
-      {pending ? "Running sandbox check..." : "Run Sandbox Check"}
+    <button className="btn-primary shrink-0" type="submit" disabled={disabled || pending}>
+      <Icon name="refresh" className="w-3.5 h-3.5" />
+      {pending ? "Running sandbox check…" : "Run sandbox check"}
     </button>
   );
 }

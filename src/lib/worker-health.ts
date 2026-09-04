@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { configuredPositiveInteger } from "@/lib/rate-limit";
+import { configuredPositiveInteger } from "@/lib/env";
 
 export const RANK_WORKER_KEY = "rank-worker";
 

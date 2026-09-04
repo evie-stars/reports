@@ -14,18 +14,23 @@
 - Scheduled reports coordinate selected SEO, Maps, and Search Console modules with per-source outcomes.
 - Client reports separate Overview, SEO, and Maps without duplicating projects or tracking setup.
 - Administrators receive in-app attention states for partial, failed, and blocked scheduled reports.
+- One-off, immutable report snapshots with a selectable subset of SEO, Maps, and Search Console data.
+- Human-readable client slugs on snapshot share URLs, paired with a long unguessable token.
+- Snapshot expiry, revocation, view counts, and an access audit trail.
+- Nonce-based Content Security Policy, fail-closed sign-in, and a production start-up guard for authentication.
+- Tag-based reconciliation of Standard task batches, request timeouts, a stuck-task reaper, and in-place retries.
+- Continuous integration running lint, type check, tests, and a production build.
+- Workspace restyled to match the Team Hub design system (Tailwind, Poppins, shared icon set).
 
 ## Next Integration Phase
+
+0. Rate limit and audit access to the read-only `/share/*` pages.
+
 
 1. Connect GA4 and make Analytics an active report module.
 2. Refresh selected GA4 modules automatically as part of scheduled reporting.
 3. Add optional email notifications for new team report requests and failed schedules.
 
-## Reporting And Sharing Phase
-
-1. Add one-off, immutable report snapshots with a selectable subset of SEO, Maps, GSC, and GA4 data.
-2. Add human-readable client slugs to share URLs while retaining a long, unguessable security token.
-3. Add snapshot expiry, revocation, and an access audit trail.
 
 ## Cost Presentation
 

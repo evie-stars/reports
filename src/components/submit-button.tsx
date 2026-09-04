@@ -4,7 +4,7 @@ import { useFormStatus } from "react-dom";
 
 export function SubmitButton({
   children,
-  className = "button",
+  className = "btn-primary",
   confirmMessage,
   disabled = false,
   pendingLabel = "Saving..."

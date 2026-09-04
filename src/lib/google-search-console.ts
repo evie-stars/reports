@@ -1,4 +1,8 @@
 import { decryptGscToken } from "@/lib/gsc-crypto";
+import { fetchWithTimeout, readJsonResponse } from "@/lib/http";
+
+/** Google reads can be repeated safely; the one-time authorization-code exchange cannot. */
+const READ_RETRIES = 2;
 
 export const GSC_READONLY_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 export const GSC_OAUTH_STATE_COOKIE = "star_reports_gsc_oauth_state";
@@ -119,7 +123,7 @@ export function googleSearchConsoleAppUrl(pathname: string) {
 
 export async function exchangeGoogleSearchConsoleCode(code: string) {
   const config = googleSearchConsoleOauthConfig();
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+  const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -129,7 +133,8 @@ export async function exchangeGoogleSearchConsoleCode(code: string) {
       grant_type: "authorization_code",
       redirect_uri: config.redirectUri
     }),
-    cache: "no-store"
+    cache: "no-store",
+    retries: 0
   });
   const payload = await readTokenResponse(response);
   if (!payload.access_token || !payload.refresh_token) {
@@ -143,11 +148,13 @@ export async function exchangeGoogleSearchConsoleCode(code: string) {
 }
 
 export async function googleAccountForAccessToken(accessToken: string) {
-  const response = await fetch(GOOGLE_USERINFO_URL, {
+  const response = await fetchWithTimeout(GOOGLE_USERINFO_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store"
+    cache: "no-store",
+    retries: READ_RETRIES
   });
-  const payload = await response.json() as { email?: string; email_verified?: boolean };
+  const payload = await readJsonResponse(response) as { email?: string; email_verified?: boolean } | null;
+  if (!payload) throw new Error("Google did not return a verified account email.");
   if (!response.ok || !payload.email || payload.email_verified === false) {
     throw new Error("Google did not return a verified account email.");
   }
@@ -156,11 +163,12 @@ export async function googleAccountForAccessToken(accessToken: string) {
 
 export async function listSearchConsoleSites(encryptedRefreshToken: string) {
   const accessToken = await refreshGoogleAccessToken(decryptGscToken(encryptedRefreshToken));
-  const response = await fetch(GSC_SITES_URL, {
+  const response = await fetchWithTimeout(GSC_SITES_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store"
+    cache: "no-store",
+    retries: READ_RETRIES
   });
-  const payload = await response.json() as { siteEntry?: SearchConsoleSite[]; error?: { message?: string } };
+  const payload = (await readJsonResponse(response) ?? {}) as { siteEntry?: SearchConsoleSite[]; error?: { message?: string } };
   if (!response.ok) throw new Error(payload.error?.message || "Google could not list Search Console properties.");
   return (payload.siteEntry ?? [])
     .filter((site) => site.siteUrl && site.permissionLevel !== "siteUnverifiedUser")
@@ -184,16 +192,18 @@ export async function querySearchConsoleDailyTotals(
     startRow: 0,
     type: "web"
   };
-  const response = await fetch(endpoint, {
+  // A search analytics query is a read, so it is safe to retry after a timeout or a 5xx.
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(requestBody),
-    cache: "no-store"
+    cache: "no-store",
+    retries: READ_RETRIES
   });
-  const responseBody = await response.json() as SearchConsoleQueryResponse;
+  const responseBody = (await readJsonResponse(response) ?? {}) as SearchConsoleQueryResponse;
   return { endpoint, requestBody, responseBody, statusCode: response.status };
 }
 
@@ -231,7 +241,7 @@ export function searchConsoleDateRange(days = 90, now = new Date()) {
 
 async function refreshGoogleAccessToken(refreshToken: string) {
   const config = googleSearchConsoleOauthConfig();
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+  const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -240,7 +250,8 @@ async function refreshGoogleAccessToken(refreshToken: string) {
       grant_type: "refresh_token",
       refresh_token: refreshToken
     }),
-    cache: "no-store"
+    cache: "no-store",
+    retries: 1
   });
   const payload = await readTokenResponse(response);
   if (!payload.access_token) throw new Error("Google Search Console access could not be refreshed. Reconnect the account.");
@@ -248,7 +259,7 @@ async function refreshGoogleAccessToken(refreshToken: string) {
 }
 
 async function readTokenResponse(response: Response) {
-  const payload = await response.json() as GoogleTokenResponse;
+  const payload = (await readJsonResponse(response) ?? {}) as GoogleTokenResponse;
   if (!response.ok || payload.error) {
     throw new Error(payload.error_description || payload.error || "Google OAuth request failed.");
   }

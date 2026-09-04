@@ -1,10 +1,16 @@
-import { Prisma, SearchType } from "@prisma/client";
 import { prisma } from "../src/lib/db";
-import { DataForSeoClient, DataForSeoMode } from "../src/lib/dataforseo";
-import { parseDataForSeoItems } from "../src/lib/rank-parser";
+import { enqueueVerification } from "../src/lib/rank-queue";
+import { executeSandboxRankRun } from "../src/lib/rank-runner";
 
+/**
+ * Smoke-test the DataForSEO integration with the first active keyword and area.
+ *
+ * `--sandbox` (default) runs immediately against the free sandbox host.
+ * `--live` queues a single paid verification through the same budget reservation and worker
+ * path as the application, so nothing can be spent outside the ledger.
+ */
 const args = new Set(process.argv.slice(2));
-const mode: DataForSeoMode = args.has("--live") ? "live" : "sandbox";
+const mode = args.has("--live") ? "live" : "sandbox";
 
 async function main() {
   const project = await prisma.project.findFirst({
@@ -13,106 +19,26 @@ async function main() {
       locations: { where: { active: true }, take: 1 }
     }
   });
-
   if (!project || project.keywords.length === 0 || project.locations.length === 0) {
     throw new Error("No project with active keywords and locations found. Run npm run db:seed or add tracking data first.");
   }
 
-  const keyword = project.keywords[0];
-  const location = project.locations[0];
-  const searchType: SearchType = "organic";
-  const client = new DataForSeoClient();
-  const tag = buildDataForSeoTag(project.clientId, project.id, "rank-check");
+  const selection = {
+    projectId: project.id,
+    keywordIds: [project.keywords[0].id],
+    locationIds: [project.locations[0].id],
+    devices: ["desktop" as const],
+    searchTypes: ["organic" as const]
+  };
 
-  const run = await prisma.rankRun.create({
-    data: {
-      projectId: project.id,
-      status: "running",
-      sandbox: mode === "sandbox",
-      source: mode === "sandbox" ? "sandbox" : "verification",
-      startedAt: new Date(),
-      requestedTasks: 1,
-      notes: `${mode} check for ${keyword.phrase} in ${location.name}`
-    }
-  });
-
-  try {
-    const response = await client.postSerpTask(
-      searchType,
-      {
-        keyword: keyword.phrase,
-        location_name: location.dataForSeoLocationName ?? location.name,
-        language_code: "en",
-        device: "desktop",
-        os: "windows",
-        depth: 10,
-        tag
-      },
-      mode
-    );
-
-    await prisma.apiRequest.create({
-      data: {
-        rankRunId: run.id,
-        endpoint: response.endpoint,
-        tag: response.tag,
-        sandbox: response.sandbox,
-        requestBody: response.requestBody as Prisma.InputJsonValue,
-        responseBody: response.responseBody as Prisma.InputJsonValue,
-        statusCode: response.statusCode,
-        costUsd: response.costUsd
-      }
-    });
-
-    const parsedItems = parseDataForSeoItems(response.responseBody, {
-      targetDomain: project.domain,
-      targetBusinessName: project.targetBusinessName
-    });
-
-    await prisma.rankResult.createMany({
-      data: parsedItems.slice(0, 20).map((item) => ({
-        runId: run.id,
-        keywordId: keyword.id,
-        locationId: location.id,
-        searchType,
-        device: "desktop",
-        rankGroup: item.rankGroup,
-        rankAbsolute: item.rankAbsolute,
-        matched: item.matched,
-        matchedName: item.title,
-        matchedUrl: item.url,
-        resultTitle: item.title,
-        resultUrl: item.url,
-        resultDomain: item.domain,
-        rawItem: item.rawItem as Prisma.InputJsonValue
-      }))
-    });
-
-    await prisma.rankRun.update({
-      where: { id: run.id },
-      data: {
-        status: "completed",
-        completedAt: new Date(),
-        actualCostUsd: response.costUsd
-      }
-    });
-
-    console.log(`Rank check completed in ${mode} mode. Run ID: ${run.id}. Cost: $${response.costUsd}`);
-  } catch (error) {
-    await prisma.rankRun.update({
-      where: { id: run.id },
-      data: {
-        status: "failed",
-        completedAt: new Date(),
-        notes: error instanceof Error ? error.message : "Unknown rank check failure"
-      }
-    });
-    throw error;
+  if (mode === "sandbox") {
+    const runId = await executeSandboxRankRun(selection);
+    console.log(`Sandbox rank check completed. Run ID: ${runId}`);
+    return;
   }
-}
 
-function buildDataForSeoTag(clientId: string, projectId: string, jobType: string) {
-  return [clientId, projectId, jobType].map((part) => part.replace(/[^a-zA-Z0-9_-]/g, "-")).join(":").slice(0, 255);
+  const runId = await enqueueVerification({ ...selection, pageLimit: 1 }, "rank-check-script");
+  console.log(`Live verification queued within the monthly budget. Run ID: ${runId}. Run "npm run rank:worker" to process it.`);
 }
 
 main()

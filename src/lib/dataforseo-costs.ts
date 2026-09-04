@@ -104,6 +104,6 @@ function decimalNumber(value: Prisma.Decimal | number | null | undefined) {
   return value === null || value === undefined ? 0 : Number(value);
 }
 
-function roundUsd(value: number) {
+export function roundUsd(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
 }

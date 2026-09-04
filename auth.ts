@@ -2,12 +2,15 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/db";
+import { configuredPositiveInteger, envList } from "@/lib/env";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import type { AppRole } from "@/lib/roles";
+import { decideUserAccess, isBootstrapAdmin, type ManagedUserLookup } from "@/lib/user-access";
 
-export type AppRole = "admin" | "manager" | "team";
+export type { AppRole } from "@/lib/roles";
 
 const authEnabled = process.env.AUTH_ENABLED === "true";
-const sessionMaxAgeSeconds = positiveInteger(process.env.AUTH_SESSION_MAX_AGE_HOURS, 10) * 60 * 60;
+const sessionMaxAgeSeconds = configuredPositiveInteger("AUTH_SESSION_MAX_AGE_HOURS", 10) * 60 * 60;
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: authEnabled
@@ -86,35 +89,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   }
 });
 
-function emailAllowed(email: string) {
-  if (!email) return false;
-  const emails = envList("AUTH_ALLOWED_EMAILS");
-  const domains = envList("AUTH_ALLOWED_DOMAINS");
-  const domain = email.split("@")[1] ?? "";
-  return emails.includes(email) || domains.includes(domain);
-}
-
+/**
+ * Environment administrators are resolved without touching the database so they remain a
+ * recovery path. Everyone else is decided by the managed access table; if that lookup fails
+ * the request is denied rather than falling back to the broad domain allowlist.
+ */
 async function resolveUserAccess(email: string): Promise<{ allowed: boolean; role: AppRole }> {
   const normalizedEmail = email.toLowerCase();
-  if (!normalizedEmail) return { allowed: false, role: "team" };
+  if (!normalizedEmail || isBootstrapAdmin(normalizedEmail)) return decideUserAccess(normalizedEmail, { record: null });
 
-  // Environment admins remain a recovery path if the database or dashboard access is unavailable.
-  if (envList("AUTH_ADMIN_EMAILS").includes(normalizedEmail)) return { allowed: true, role: "admin" };
-
+  let lookup: ManagedUserLookup;
   try {
     const userAccess = await prisma.userAccess.findUnique({ where: { email: normalizedEmail } });
-    if (userAccess) return { allowed: userAccess.enabled, role: userAccess.role };
+    lookup = { record: userAccess ? { enabled: userAccess.enabled, role: userAccess.role } : null };
   } catch (error) {
-    console.error("[auth] Unable to read managed user access", error);
+    console.error("[auth] Unable to read managed user access; denying access until the database recovers", error);
+    lookup = { unavailable: true };
   }
-
-  const role = envList("AUTH_MANAGER_EMAILS").includes(normalizedEmail) ? "manager" : "team";
-  return { allowed: emailAllowed(normalizedEmail), role };
+  return decideUserAccess(normalizedEmail, lookup);
 }
 
 async function recordSuccessfulSignIn(email: string, name: string | null, role: AppRole) {
   try {
-    const bootstrapAdmin = envList("AUTH_ADMIN_EMAILS").includes(email);
+    const bootstrapAdmin = isBootstrapAdmin(email);
     await prisma.userAccess.upsert({
       where: { email },
       create: { email, name, role, enabled: true, lastSignInAt: new Date() },
@@ -127,16 +124,4 @@ async function recordSuccessfulSignIn(email: string, name: string | null, role: 
   } catch (error) {
     console.error("[auth] Unable to update managed user access", error);
   }
-}
-
-function envList(name: string) {
-  return (process.env[name] ?? "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function positiveInteger(value: string | undefined, fallback: number) {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

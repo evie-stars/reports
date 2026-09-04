@@ -1,9 +1,23 @@
+# Environment
 .env
-.env*.local
+.env.*
+!.env.example
+
+# Build output and caches
 .next
-node_modules
 dist
 coverage
 *.tsbuildinfo
 *.log
+
+# Dependencies
+node_modules
+
+# Local databases
 prisma/dev.db
+
+# Editor, agent and OS files
+.claude/launch.json
+.DS_Store
+.idea/
+.vscode/

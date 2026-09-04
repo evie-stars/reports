@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { Icon } from "@/components/icon";
+import { EmptyRow, TableWrap } from "@/components/ui/table";
+import { formatCount, formatDate, movementTone, readableValue, type Tone } from "@/lib/format";
 
 export type RankMatrixResult = {
   id: string;
@@ -41,6 +44,22 @@ type MatrixRow = {
 const searchTypeOrder = ["organic", "local_finder", "maps"];
 const deviceOrder = ["desktop", "mobile"];
 
+const BADGE: Record<Tone, string> = {
+  accent: "bg-accent/10 text-accent",
+  blocked: "bg-blocked/10 text-blocked",
+  default: "bg-line/60 text-ink",
+  sky: "bg-sky/10 text-sky",
+  warn: "bg-warn/10 text-warn"
+};
+
+const MOVEMENT: Record<Tone, string> = {
+  accent: "text-accent",
+  blocked: "text-blocked",
+  default: "text-slate",
+  sky: "text-sky",
+  warn: "text-warn"
+};
+
 export function buildRankMatrix(results: RankMatrixResult[]) {
   const columns = Array.from(
     new Map(results.map((result) => [columnKey(result.searchType, result.device), {
@@ -71,6 +90,16 @@ export function buildRankMatrix(results: RankMatrixResult[]) {
   return { columns, rows: Array.from(rows.values()) };
 }
 
+/** Two-line column heading: result type over device. */
+export function RankMatrixColumnHeading({ column }: { column: { searchType: string; device: string } }) {
+  return (
+    <>
+      <span className="block">{readableValue(column.searchType)}</span>
+      <span className="block text-[10px] font-normal normal-case tracking-normal text-slate/80">{readableValue(column.device)}</span>
+    </>
+  );
+}
+
 export function RankMatrix({
   results,
   emptyMessage,
@@ -88,65 +117,75 @@ export function RankMatrix({
   const columnCount = 2 + columns.length + Number(showVolume) + Number(showChecked);
 
   return (
-    <div className="table-scroll rank-matrix-scroll">
-      <table className="table rank-matrix-table">
+    <TableWrap>
+      <table className="table">
         <thead>
           <tr>
-            <th className="matrix-keyword-heading">Keyword</th>
-            <th className="matrix-area-heading">Area</th>
-            {showVolume ? <th className="matrix-volume-heading">Volume</th> : null}
+            <th>Keyword</th>
+            <th>Area</th>
+            {showVolume ? <th className="text-right">Volume</th> : null}
             {columns.map((column) => (
-              <th className="matrix-result-heading" key={column.key}>
-                <span>{readableType(column.searchType)}</span>
-                <small>{readableType(column.device)}</small>
+              <th className="text-center" key={column.key}>
+                <RankMatrixColumnHeading column={column} />
               </th>
             ))}
-            {showChecked ? <th className="matrix-date-heading">Checked</th> : null}
+            {showChecked ? <th>Checked</th> : null}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="matrix-keyword-cell">
+              <td className="min-w-[10rem]">
                 {keywordHref ? (
-                  <Link className="keyword-history-link" href={keywordHref(row.keywordId)} scroll={false}>{row.keyword}</Link>
-                ) : <strong>{row.keyword}</strong>}
+                  <Link className="font-medium hover:text-accent hover:underline" href={keywordHref(row.keywordId)} scroll={false}>{row.keyword}</Link>
+                ) : <span className="font-medium">{row.keyword}</span>}
               </td>
-              <td>{row.location}</td>
-              {showVolume ? <td>{row.searchVolume?.toLocaleString("en-GB") ?? "-"}</td> : null}
+              <td className="text-slate whitespace-nowrap">{row.location}</td>
+              {showVolume ? (
+                <td className="text-right font-mono text-xs text-slate whitespace-nowrap">
+                  {row.searchVolume === null || row.searchVolume === undefined ? "-" : formatCount(row.searchVolume)}
+                </td>
+              ) : null}
               {columns.map((column) => (
-                <td className="matrix-result-cell" key={column.key}>
-                  {row.cells[column.key] ? <RankMatrixRank result={row.cells[column.key]} /> : <span className="matrix-empty-cell">-</span>}
+                <td className="text-center" key={column.key}>
+                  {row.cells[column.key] ? <RankMatrixRank result={row.cells[column.key]} /> : <span className="text-slate">-</span>}
                 </td>
               ))}
-              {showChecked ? <td className="matrix-date-cell">{row.checkedAt?.toLocaleDateString("en-GB") ?? "-"}</td> : null}
+              {showChecked ? <td className="text-slate whitespace-nowrap">{row.checkedAt ? formatDate(row.checkedAt) : "-"}</td> : null}
             </tr>
           ))}
-          {rows.length === 0 ? (
-            <tr><td className="empty-table" colSpan={columnCount}>{emptyMessage}</td></tr>
-          ) : null}
+          {rows.length === 0 ? <EmptyRow colSpan={columnCount}>{emptyMessage}</EmptyRow> : null}
         </tbody>
       </table>
-    </div>
+    </TableWrap>
   );
 }
 
 export function RankMatrixRank({ result }: { result: RankMatrixResult }) {
-  const state = movementState(result.direction);
+  const tone = movementTone(result.direction);
   const movement = movementLabel(result);
   const title = cellTitle(result);
   const rank = result.rank ?? "-";
+  const badge = `inline-flex min-w-[2rem] justify-center rounded-md px-1.5 py-0.5 text-xs font-semibold ${result.rank === null ? "text-slate" : BADGE[tone]}`;
 
   return (
-    <div className="matrix-result" title={title}>
-      <span className={`matrix-position ${state}`}>
+    <span className="inline-flex flex-col items-center gap-0.5" title={title}>
+      <span className="inline-flex items-center gap-1">
         {result.matchedUrl ? (
-          <a href={result.matchedUrl} target="_blank" rel="noreferrer" aria-label={`${title}. Open ranked page.`}>{rank}</a>
-        ) : <span>{rank}</span>}
+          <a
+            href={result.matchedUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`${title}. Open ranked page.`}
+            className={`${badge} transition-opacity hover:opacity-75`}
+          >
+            {rank}
+          </a>
+        ) : <span className={badge}>{rank}</span>}
+        {result.issues?.length ? <Icon name="alert-circle" className="w-3.5 h-3.5 text-warn shrink-0" title={result.issues.join(", ")} /> : null}
       </span>
-      {movement ? <small className={`matrix-movement ${state}`}>{movement}</small> : null}
-      {result.issues?.length ? <i className="matrix-issue" aria-label={result.issues.join(", ")}>!</i> : null}
-    </div>
+      {movement ? <span className={`text-[10px] leading-none font-medium ${MOVEMENT[tone]}`}>{movement}</span> : null}
+    </span>
   );
 }
 
@@ -162,7 +201,7 @@ function movementLabel(result: RankMatrixResult) {
 
 function cellTitle(result: RankMatrixResult) {
   const parts = [
-    `${readableType(result.searchType)} ${readableType(result.device)}: ${result.rank === null ? "not found" : `position ${result.rank}`}`
+    `${readableValue(result.searchType)} ${readableValue(result.device)}: ${result.rank === null ? "not found" : `position ${result.rank}`}`
   ];
   if (result.previousRank !== null) parts.push(`previously ${result.previousRank}`);
   if (result.matchedUrl) parts.push(result.matchedUrl);
@@ -184,15 +223,4 @@ function orderOf(order: string[], value: string) {
 
 function columnKey(searchType: string, device: string) {
   return `${searchType}:${device}`;
-}
-
-function movementState(direction: string | null) {
-  if (direction === "up") return "up";
-  if (direction === "down" || direction === "lost") return "down";
-  if (direction === "new") return "new";
-  return "unchanged";
-}
-
-function readableType(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

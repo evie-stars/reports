@@ -1,5 +1,6 @@
-import { Prisma, type RankDirection } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { parse } from "csv-parse/sync";
+import { movementDirection } from "@/lib/dataforseo-response";
 import { prisma } from "@/lib/db";
 
 const IMPORT_SOURCE = "legacy_rank_history_csv";
@@ -243,15 +244,6 @@ function normalizeDomain(value: string) {
   } catch {
     return value.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase();
   }
-}
-
-function movementDirection(rank: number | null, previousRank: number | null): RankDirection | null {
-  if (rank === null && previousRank === null) return null;
-  if (rank === null) return "lost";
-  if (previousRank === null) return "new";
-  if (rank < previousRank) return "up";
-  if (rank > previousRank) return "down";
-  return "unchanged";
 }
 
 function requiredMapValue(map: Map<string, string>, key: string, label: string) {

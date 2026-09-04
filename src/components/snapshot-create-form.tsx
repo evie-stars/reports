@@ -24,50 +24,62 @@ export function SnapshotCreateForm({
   }
 
   return (
-    <form className="snapshot-create-form" action={action}>
-      <fieldset className="snapshot-module-options">
-        <legend>Include</legend>
-        <SnapshotOption
-          checked={selected.includes("rankings")}
-          description="Organic rankings and progress"
-          enabled={availability.rankings}
-          label="SEO"
-          module="rankings"
-          onChange={toggle}
-        />
-        <SnapshotOption
-          checked={selected.includes("maps")}
-          description="Google Maps rankings"
-          enabled={availability.maps}
-          label="Maps"
-          module="maps"
-          onChange={toggle}
-        />
-        <SnapshotOption
-          checked={selected.includes("gsc")}
-          description={availability.gsc ? "Clicks and visibility" : "Map and import data first"}
-          enabled={availability.gsc}
-          label="Search Console"
-          module="gsc"
-          onChange={toggle}
-        />
-        <label className="disabled">
-          <input type="checkbox" disabled />
-          <span><strong>Analytics</strong><small>Available after GA4 is connected</small></span>
-        </label>
+    <form action={action} className="space-y-4">
+      <fieldset>
+        <legend className="field-label">Include</legend>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          <SnapshotOption
+            checked={selected.includes("rankings")}
+            description="Organic rankings and progress"
+            enabled={availability.rankings}
+            label="SEO"
+            module="rankings"
+            onChange={toggle}
+          />
+          <SnapshotOption
+            checked={selected.includes("maps")}
+            description="Google Maps rankings"
+            enabled={availability.maps}
+            label="Maps"
+            module="maps"
+            onChange={toggle}
+          />
+          <SnapshotOption
+            checked={selected.includes("gsc")}
+            description={availability.gsc ? "Clicks and visibility" : "Map and import data first"}
+            enabled={availability.gsc}
+            label="Search Console"
+            module="gsc"
+            onChange={toggle}
+          />
+          <label className="choice flex items-start rounded-xl border border-line p-3 opacity-50 cursor-not-allowed">
+            <input type="checkbox" disabled className="mt-0.5" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">Analytics</span>
+              <span className="block text-xs text-slate">Available after GA4 is connected</span>
+            </span>
+          </label>
+        </div>
       </fieldset>
-      <label className="share-expiry-select">
-        Snapshot lifetime
-        <select name="shareExpiryDays" defaultValue="30">
-          <option value="7">7 days</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="365">1 year</option>
-        </select>
-      </label>
-      <div className="snapshot-create-action">
-        <SubmitButton disabled={selected.length === 0} pendingLabel="Creating snapshot...">Create Snapshot</SubmitButton>
-        {!hasAvailableData ? <small>Add or import report data before creating a snapshot.</small> : selected.length === 0 ? <small>Select at least one report section.</small> : null}
+
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <label className="block sm:w-44">
+          <span className="field-label">Snapshot lifetime</span>
+          <select name="shareExpiryDays" defaultValue="30" className="field">
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <SubmitButton disabled={selected.length === 0} pendingLabel="Creating snapshot...">Create snapshot</SubmitButton>
+          {!hasAvailableData ? (
+            <p className="text-xs text-slate">Add or import report data before creating a snapshot.</p>
+          ) : selected.length === 0 ? (
+            <p className="text-xs text-slate">Select at least one report section.</p>
+          ) : null}
+        </div>
       </div>
     </form>
   );
@@ -89,7 +101,9 @@ function SnapshotOption({
   onChange: (module: SnapshotModule, checked: boolean) => void;
 }) {
   return (
-    <label className={!enabled ? "disabled" : ""}>
+    <label
+      className={`choice flex items-start rounded-xl border border-line p-3 transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent/5 ${enabled ? "hover:border-slate/40" : "opacity-50 cursor-not-allowed"}`}
+    >
       <input
         checked={checked}
         disabled={!enabled}
@@ -97,8 +111,12 @@ function SnapshotOption({
         onChange={(event) => onChange(module, event.target.checked)}
         type="checkbox"
         value={module}
+        className="mt-0.5"
       />
-      <span><strong>{label}</strong><small>{description}</small></span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="block text-xs text-slate">{description}</span>
+      </span>
     </label>
   );
 }
