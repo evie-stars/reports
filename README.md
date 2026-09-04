@@ -50,11 +50,13 @@ Authentication is off until `AUTH_ENABLED=true`. Create a Google OAuth web clien
 https://reports.starwebsites.co.uk/api/auth/callback/google
 ```
 
-Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access, emails in `AUTH_MANAGER_EMAILS` receive manager access, and all other approved accounts receive the team role. A verified Google email must still match the allowlist. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
+Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
 - **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
 - **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console property mapping.
 - **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
+
+The dashboard access panel records successful users automatically, supports direct invitations by verified Google email, applies role changes on the next authenticated request, and keeps environment administrators protected as emergency recovery accounts.
 
 ## Security Controls
 

@@ -85,6 +85,25 @@ enum ReportRequestStatus {
   completed
 }
 
+enum UserRole {
+  admin
+  manager
+  team
+}
+
+model UserAccess {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  role         UserRole @default(team)
+  enabled      Boolean  @default(true)
+  lastSignInAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled, role])
+}
+
 model Client {
   id             String    @id @default(cuid())
   name           String

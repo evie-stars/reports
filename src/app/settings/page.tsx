@@ -24,21 +24,21 @@ export default async function SettingsPage({ searchParams }: {
   const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
-  const allowedAccessConfigured = Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
-  const managerAccessConfigured = Boolean(process.env.AUTH_MANAGER_EMAILS);
   const gscConfigured = googleSearchConsoleConfigured();
   const budget = await getDataForSeoBudgetSummary();
   const weekAgo = sevenDaysAgo();
-  const [heartbeat, failedRuns, auditLogs, gscConnections] = await Promise.all([
+  const [heartbeat, failedRuns, auditLogs, gscConnections, managedUsers] = await Promise.all([
     prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
     prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
     prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
     prisma.googleSearchConsoleConnection.findMany({
       orderBy: { connectedAt: "desc" },
       include: { _count: { select: { projects: true } } }
-    })
+    }),
+    prisma.userAccess.count({ where: { enabled: true } })
   ]);
   const worker = workerHealth(heartbeat);
+  const allowedAccessConfigured = managedUsers > 0 || Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
 
   return (
     <>
@@ -145,7 +145,7 @@ export default async function SettingsPage({ searchParams }: {
               </tr>
               <tr>
                 <th>Access Roles</th>
-                <td><span className={managerAccessConfigured ? "status good" : "status warn"}>{managerAccessConfigured ? "Admin · Manager · Team" : "Admin · Team"}</span></td>
+                <td><span className="status good">Admin · Manager · Team</span><small className="row-context">{managedUsers} dashboard-managed</small></td>
               </tr>
               <tr>
                 <th>Team Re-run Cooldown</th>

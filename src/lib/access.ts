@@ -17,7 +17,7 @@ export async function currentActor(): Promise<CurrentActor> {
   }
 
   const session = await auth();
-  if (!session?.user?.email) redirect("/login");
+  if (!session?.user?.email || session.user.accessEnabled === false) redirect("/login");
   return {
     email: session.user.email.toLowerCase(),
     name: session.user.name ?? null,

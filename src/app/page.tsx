@@ -4,7 +4,7 @@ import { Icon } from "@/components/icon";
 import { workerHealth } from "@/lib/worker-health";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { reviewReportRequest } from "@/app/actions";
+import { createUserAccess, reviewReportRequest, toggleUserAccess, updateUserAccessRole } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +54,85 @@ export default async function DashboardPage() {
           <ConfigurationItem label="Failed jobs" value={data.failedRuns ? `${data.failedRuns} in 7 days` : "None"} good={data.failedRuns === 0} />
           <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
         </div>
+      </section>
+
+      <section className="card spaced-section user-access-panel" aria-labelledby="user-access-title">
+        <div className="section-heading compact-heading">
+          <div>
+            <p className="label label-with-icon"><Icon name="contacts" />Access Control</p>
+            <h3 id="user-access-title">Users and roles</h3>
+          </div>
+          <span className="muted user-count">{data.users.filter((user) => user.enabled || isBootstrapAdmin(user.email)).length} active</span>
+        </div>
+
+        <form action={createUserAccess} className="user-access-create-form">
+          <label>
+            Email address
+            <input name="email" type="email" placeholder="name@starwebsites.co.uk" required />
+          </label>
+          <label>
+            Name <span className="optional-label">Optional</span>
+            <input name="name" type="text" placeholder="Full name" />
+          </label>
+          <label>
+            Role
+            <select name="role" defaultValue="team">
+              <option value="team">Team</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <SubmitButton pendingLabel="Adding user...">Add User</SubmitButton>
+        </form>
+
+        <div className="table-scroll user-access-table-wrap">
+          <table className="table user-access-table">
+            <thead><tr><th>User</th><th>Role</th><th>Access</th><th>Last Sign-in</th><th><span className="sr-only">Action</span></th></tr></thead>
+            <tbody>
+              {data.users.map((user) => {
+                const protectedAdmin = isBootstrapAdmin(user.email);
+                const currentUser = user.email === actor.email;
+                const enabled = protectedAdmin || user.enabled;
+                return (
+                  <tr key={user.id}>
+                    <td><strong>{user.name ?? user.email}</strong>{user.name ? <small className="row-context">{user.email}</small> : null}</td>
+                    <td>
+                      {protectedAdmin || currentUser ? (
+                        <span className="protected-role"><strong>{roleLabel(protectedAdmin ? "admin" : user.role)}</strong><small>{protectedAdmin ? "Protected by Plesk" : "Current user"}</small></span>
+                      ) : (
+                        <form action={updateUserAccessRole.bind(null, user.id)} className="user-role-form">
+                          <select name="role" defaultValue={user.role} aria-label={`Role for ${user.email}`}>
+                            <option value="team">Team</option>
+                            <option value="manager">Manager</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          <SubmitButton className="button button-secondary" pendingLabel="Saving...">Save</SubmitButton>
+                        </form>
+                      )}
+                    </td>
+                    <td><span className={`status ${enabled ? "good" : "danger"}`}>{enabled ? "Active" : "Revoked"}</span></td>
+                    <td>{user.lastSignInAt ? user.lastSignInAt.toLocaleDateString("en-GB") : <span className="muted">Not yet</span>}</td>
+                    <td className="table-action-cell">
+                      {protectedAdmin || currentUser ? null : (
+                        <form action={toggleUserAccess.bind(null, user.id)}>
+                          <SubmitButton
+                            className="button button-secondary"
+                            confirmMessage={enabled ? `Revoke access for ${user.email}?` : undefined}
+                            pendingLabel={enabled ? "Revoking..." : "Enabling..."}
+                          >
+                            {enabled ? "Revoke" : "Enable"}
+                          </SubmitButton>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {data.users.length === 0 ? <tr><td colSpan={5} className="muted">Users will appear here after they sign in or are added above.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+        <p className="user-access-help">Role changes apply on the user&apos;s next page load. Keep at least one email in `AUTH_ADMIN_EMAILS` as emergency access.</p>
       </section>
 
       {data.reportRequests.length > 0 ? (
@@ -123,7 +202,7 @@ export default async function DashboardPage() {
 async function getDashboardData() {
   try {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests] = await Promise.all([
+    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, users] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
@@ -137,10 +216,11 @@ async function getDashboardData() {
         take: 5,
         include: { project: { include: { client: true } } }
       }),
-      prisma.reportRequest.findMany({ where: { status: "pending" }, orderBy: { createdAt: "asc" }, take: 10 })
+      prisma.reportRequest.findMany({ where: { status: "pending" }, orderBy: { createdAt: "asc" }, take: 10 }),
+      prisma.userAccess.findMany({ orderBy: [{ enabled: "desc" }, { name: "asc" }, { email: "asc" }] })
     ]);
 
-    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, users, dbUnavailable: false };
   } catch {
     return {
       clients: 0,
@@ -153,6 +233,7 @@ async function getDashboardData() {
       heartbeat: null,
       runs: [],
       reportRequests: [],
+      users: [],
       dbUnavailable: true
     };
   }
@@ -194,4 +275,16 @@ function dashboardStatusTone(status: string) {
   if (status === "completed") return "good";
   if (status === "failed" || status === "blocked") return "danger";
   return "warn";
+}
+
+function isBootstrapAdmin(email: string) {
+  return (process.env.AUTH_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email.toLowerCase());
+}
+
+function roleLabel(role: string) {
+  return role.charAt(0).toUpperCase() + role.slice(1);
 }
