@@ -288,6 +288,29 @@ model GoogleConnection {
   @@map("GoogleSearchConsoleConnection")
 }
 
+/// An API credential managed from Settings. The value is a JSON field map encrypted with the
+/// server-held master key; only the fingerprint and a non-secret display hint are ever shown.
+model AppSecret {
+  id                     String    @id @default(cuid())
+  name                   String    @unique
+  encryptedValue         String
+  fingerprint            String
+  displayHint            String
+  version                Int       @default(1)
+  previousEncryptedValue String?
+  previousFingerprint    String?
+  previousDisplayHint    String?
+  previousUpdatedAt      DateTime?
+  /// When the current value was saved or restored; `updatedAt` also moves on verification checks.
+  savedAt                DateTime  @default(now())
+  previousSavedAt        DateTime?
+  updatedByEmail         String
+  lastVerifiedAt         DateTime?
+  lastError              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
 model Keyword {
   id               String                  @id @default(cuid())
   projectId        String

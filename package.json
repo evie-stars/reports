@@ -15,7 +15,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "rank:sandbox": "tsx scripts/run-rank-check.ts --sandbox",
     "rank:live": "tsx scripts/run-rank-check.ts --live",
-    "rank:worker": "node --env-file=.env --import tsx scripts/process-rank-queue.ts"
+    "rank:worker": "node --env-file=.env --import tsx scripts/process-rank-queue.ts",
+    "secrets:rekey": "node --env-file=.env --import tsx scripts/rekey-secrets.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",

@@ -9,10 +9,11 @@ import {
   GOOGLE_OAUTH_PRODUCT_COOKIE,
   GOOGLE_OAUTH_STATE_COOKIE,
   googleIntegrationsAppUrl,
-  googleIntegrationsConfigured,
-  isGoogleIntegrationProduct
+  isGoogleIntegrationProduct,
+  resolveGoogleIntegrationsConfig
 } from "@/lib/google-oauth";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { masterEncryptionKeyConfigured } from "@/lib/secret-crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +32,12 @@ export async function GET(request: NextRequest) {
   try {
     await enforceRateLimit("google:oauth", actor.email, { limit: 5, windowSeconds: 60 * 60 });
     if (!product) throw new Error("Unknown Google integration.");
-    if (!googleIntegrationsConfigured()) throw new Error("Google integration credentials are not configured.");
+    const config = await resolveGoogleIntegrationsConfig();
+    if (!config || !masterEncryptionKeyConfigured()) throw new Error("Google integration credentials or the encryption key are not configured.");
 
     const definition = GOOGLE_INTEGRATION_PRODUCTS[product];
     const state = randomBytes(32).toString("base64url");
-    const response = NextResponse.redirect(buildGoogleAuthorizationUrl(state, [definition.scope]));
+    const response = NextResponse.redirect(buildGoogleAuthorizationUrl(state, [definition.scope], config));
     const cookieOptions = {
       httpOnly: true,
       maxAge: 10 * 60,

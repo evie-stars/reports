@@ -96,6 +96,10 @@ export function ga4ImportRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_GA4_IMPORTS_PER_HOUR", 6), windowSeconds: 60 * 60 };
 }
 
+export function secretChangeRateLimit(): RateLimitPolicy {
+  return { limit: configuredPositiveInteger("RATE_LIMIT_SECRET_CHANGES_PER_HOUR", 10), windowSeconds: 60 * 60 };
+}
+
 export function apiRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_API_REQUESTS_PER_MINUTE", 60), windowSeconds: 60 };
 }

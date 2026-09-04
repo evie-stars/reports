@@ -1,11 +1,16 @@
 import { z } from "zod";
+import { resolveSecret } from "@/lib/app-secrets";
 import { readCost } from "@/lib/dataforseo-response";
 import { configuredPositiveInteger } from "@/lib/env";
 import { fetchWithTimeout, readJsonResponse } from "@/lib/http";
 
+export const DATAFORSEO_CREDENTIALS_MISSING_MESSAGE =
+  "DataForSEO API credentials are not configured. Add them in Settings or set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD.";
+
+export type DataForSeoCredentials = { login: string; password: string };
+
+/** Safety flags stay in the environment; the login and password come from the key store. */
 const configSchema = z.object({
-  DATAFORSEO_LOGIN: z.string().optional(),
-  DATAFORSEO_PASSWORD: z.string().optional(),
   DATAFORSEO_SANDBOX: z.string().default("true"),
   DATAFORSEO_LIVE_ENABLED: z.string().default("false"),
   DATAFORSEO_MAX_LIVE_TASKS_PER_RUN: z.coerce.number().int().positive().default(1),
@@ -57,18 +62,20 @@ const locationCache = new Map<string, { expiresAt: number; locations: DataForSeo
 const READ_RETRIES = 2;
 
 export class DataForSeoClient {
-  private readonly login?: string;
-  private readonly password?: string;
+  private readonly injectedCredentials: DataForSeoCredentials | null;
+  private credentialsPromise: Promise<DataForSeoCredentials> | null = null;
   private readonly sandboxDefault: boolean;
   private readonly liveEnabled: boolean;
   private readonly maxLiveTasks: number;
   private readonly maxStandardTasks: number;
   private readonly keywordMetricsEnabled: boolean;
 
-  constructor(env: Record<string, string | undefined> = process.env) {
+  constructor(
+    env: Record<string, string | undefined> = process.env,
+    options: { credentials?: DataForSeoCredentials } = {}
+  ) {
     const config = configSchema.parse(env);
-    this.login = config.DATAFORSEO_LOGIN;
-    this.password = config.DATAFORSEO_PASSWORD;
+    this.injectedCredentials = options.credentials ?? null;
     this.sandboxDefault = config.DATAFORSEO_SANDBOX !== "false";
     this.liveEnabled = config.DATAFORSEO_LIVE_ENABLED === "true";
     this.maxLiveTasks = config.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN;
@@ -84,7 +91,7 @@ export class DataForSeoClient {
     const endpoint = `/v3/serp/google/${searchType}/live/advanced`;
     const response = await fetchWithTimeout(`https://${host}${endpoint}`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify([task]),
       timeoutMs: this.timeoutMs(),
       retries: 0
@@ -109,7 +116,7 @@ export class DataForSeoClient {
     if (cached && cached.expiresAt > Date.now()) return cached.locations;
 
     const response = await fetchWithTimeout(`https://api.dataforseo.com/v3/serp/google/locations/${country}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
       cache: "no-store",
       timeoutMs: this.timeoutMs(),
       retries: READ_RETRIES
@@ -181,10 +188,25 @@ export class DataForSeoClient {
     }
   }
 
-  private headers() {
-    if (!this.login || !this.password) throw new Error("Missing DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD.");
+  /** Credentials are resolved on first use so a rotation in Settings applies without a restart. */
+  private credentials(): Promise<DataForSeoCredentials> {
+    if (this.injectedCredentials) return Promise.resolve(this.injectedCredentials);
+    this.credentialsPromise ??= resolveSecret("dataforseo")
+      .then(({ values }) => {
+        if (!values?.login || !values.password) throw new Error(DATAFORSEO_CREDENTIALS_MISSING_MESSAGE);
+        return { login: values.login, password: values.password };
+      })
+      .catch((error: unknown) => {
+        this.credentialsPromise = null;
+        throw error;
+      });
+    return this.credentialsPromise;
+  }
+
+  private async headers() {
+    const { login, password } = await this.credentials();
     return {
-      Authorization: `Basic ${Buffer.from(`${this.login}:${this.password}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${login}:${password}`).toString("base64")}`,
       "Content-Type": "application/json"
     };
   }
@@ -200,7 +222,7 @@ export class DataForSeoClient {
     const method = options.method ?? "GET";
     const response = await fetchWithTimeout(`https://api.dataforseo.com${endpoint}`, {
       method,
-      headers: this.headers(),
+      headers: await this.headers(),
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       cache: "no-store",
       timeoutMs: this.timeoutMs(),

@@ -56,7 +56,7 @@ https://reports.starwebsites.co.uk/api/auth/callback/google
 
 Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. When the user table is unavailable, sign-ins fail closed rather than falling back to the domain allowlist. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
-- **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
+- **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls. Changing API keys is reserved for the administrators listed in `AUTH_ADMIN_EMAILS`.
 - **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console and Analytics property mapping.
 - **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
 
@@ -67,7 +67,7 @@ The dashboard access panel records successful users automatically, supports dire
 - A per-request nonce-based Content Security Policy is set in `src/proxy.ts`. Scripts run only when they carry the request nonce, so injected inline scripts cannot execute. HSTS, frame, MIME-sniffing, referrer, and browser-permission headers are applied by Next.js.
 - A production server (`NODE_ENV=production`) refuses to start unless `AUTH_ENABLED=true` and `AUTH_SECRET` are set, so the local "everyone is an administrator" mode can never reach a live deployment.
 - If the managed user table cannot be read during sign-in or session refresh, access is denied until the database recovers. Only `AUTH_ADMIN_EMAILS` remain reachable, as the emergency recovery path.
-- Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, and share-link changes are stored in the admin audit trail.
+- Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, share-link changes, and every API key change are stored in the admin audit trail. Key values never appear in it.
 - Database-backed limits protect authenticated mutations, paid reports, share-link changes, Google sign-ins, and the locations API. Limits are configurable with the `RATE_LIMIT_*` environment variables.
 - The rank worker records a heartbeat on every run. The dashboard and Settings page flag stale workers and failed or blocked jobs from the last seven days.
 - Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account.
@@ -80,6 +80,28 @@ Complete these infrastructure-level items as the reporting integrations expand:
 2. Complete a focused application and infrastructure security review before importing broader analytics datasets, such as landing-page or event-level GA4 data.
 3. Rate limit and audit the read-only `/share/*` pages, which are reachable without a Google account.
 
+## API Keys
+
+The DataForSEO login and password and the Google integrations client ID and secret can be rotated from **Settings → API keys** instead of editing `.env` on Plesk. The environment variables keep working as a bootstrap fallback; a key saved in the app takes precedence and applies to new requests immediately, including the scheduled worker.
+
+- Values are write-only. The page shows a masked hint, a keyed fingerprint, the version, who saved it and when, and the result of the last check. No stored value is ever sent to a browser.
+- Values are encrypted at rest with AES-256-GCM under the master key in `APP_SECRETS_ENCRYPTION_KEY`, which only exists in the server environment. A database dump alone cannot recover them. The app reads the key from the Plesk environment and the worker from `.env`, so the same value must be set in both places; a stored key the worker cannot decrypt is reported as unreadable rather than silently replaced by the environment value.
+- Only administrators listed in `AUTH_ADMIN_EMAILS` can save, check, roll back or remove keys. Other administrators see the status only. Changes are rate-limited (`RATE_LIMIT_SECRET_CHANGES_PER_HOUR`) and audited without values.
+- **Save and check** proves the new credentials with the provider before they replace the current ones: DataForSEO is asked for its free account summary, and Google's token endpoint is asked to reject a deliberately invalid refresh token, which only succeeds when the client ID and secret are accepted. A definitive rejection is not saved. If the provider cannot be reached the key is saved with a warning and can be checked again later.
+- The previous version is kept for a one-click **Roll back**. **Remove from app** returns to the environment value; the confirmation says whether one exists and whether it differs. Both are refused when they would switch to a different account or client while paid tasks are pending or accounts are connected: save those credentials through the form with the confirmation ticked instead.
+- A different DataForSEO login cannot collect paid tasks posted by the old account, and a different Google client ID invalidates every stored refresh token, so both need an explicit confirmation on the form. Rotating a password or client secret within the same account is safe.
+- The Google check confirms only that the client ID and secret are accepted. It cannot tell whether the redirect URI is registered on that client, whether the required APIs are enabled, or whether the consent screen is still in testing mode (which expires refresh tokens after seven days).
+- **Incident response:** set `APP_SECRETS_SOURCE=environment` in Plesk and restart. The app then ignores every stored key, uses the environment values, and disables the forms until the variable is removed.
+
+### Rotating the master key
+
+1. Set `APP_SECRETS_ENCRYPTION_KEY` to a new `openssl rand -hex 32` value and `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` to the key currently protecting the database, in both the Plesk environment and `.env`. A deployment that only ever had the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` can leave it in place instead: a legacy key that differs from the new one is treated as the previous key.
+2. Restart the app and the worker. From now on both read values encrypted under either key and write only under the new one, so nothing is lost during the rotation.
+3. Run `npm run secrets:rekey`. Every stored key and Google refresh token is re-encrypted in one transaction while a lock blocks saves from Settings; the script can be re-run safely, and Settings shows a reminder until the previous key is gone.
+4. Remove `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` and the legacy variable, then restart again.
+
+Existing deployments need no change to keep working: the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` is read whenever the new name is empty. Do not generate a fresh `APP_SECRETS_ENCRYPTION_KEY` on a deployment that already has connected Google accounts without following the rotation steps above.
+
 ## Google Search Console
 
 Search Console and Google Analytics 4 share one read-only Google OAuth client, separate from the sign-in client. An administrator connects a Google account from Settings, granting each product's scope separately (Google's incremental authorisation folds an earlier grant into the new token), and a manager maps one verified property to each report. Access tokens are generated only when needed; the long-lived refresh token is encrypted at rest with AES-256-GCM. The stored scope list always mirrors the latest token response, so if a grant is revoked at Google and the account is reconnected, Settings warns that the missing product needs to be granted again.
@@ -90,16 +112,16 @@ Create a Google OAuth web client with this production redirect URI, and enable t
 https://reports.starwebsites.co.uk/api/integrations/google/callback
 ```
 
-Set these server variables:
+Set the redirect URI and the master key on the server, and either save the client ID and secret under **Settings → API keys** or set them as environment variables:
 
 ```text
-GOOGLE_SEARCH_CONSOLE_CLIENT_ID
-GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET
 GOOGLE_SEARCH_CONSOLE_REDIRECT_URI
-GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY
+APP_SECRETS_ENCRYPTION_KEY
+GOOGLE_SEARCH_CONSOLE_CLIENT_ID      (optional when stored in the app)
+GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET  (optional when stored in the app)
 ```
 
-Generate the encryption key once with `openssl rand -hex 32`, store it with the application secrets, and include it in database-backup recovery documentation. Changing or losing this key makes existing connected-account tokens unreadable.
+The token encryption key is the master key described under [API Keys](#api-keys) (`APP_SECRETS_ENCRYPTION_KEY`, or the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY`). Losing it makes existing connected-account tokens unreadable; rotating it is supported with `npm run secrets:rekey`.
 
 After deployment, open **Settings**, connect the Google account for Search Console, then open a report's settings and select its Search Console property. The Search Console grant requests only `webmasters.readonly` access. Disconnecting an account in Report Hub removes the locally stored token together with its Search Console and Analytics report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
@@ -131,7 +153,7 @@ The workspace shares its design language with Team Hub: Tailwind CSS v3 with the
    cp .env.example .env
    ```
 
-3. Set `DATABASE_URL` to your PostgreSQL database.
+3. Set `DATABASE_URL` to your PostgreSQL database and generate `APP_SECRETS_ENCRYPTION_KEY` with `openssl rand -hex 32` if you intend to use the Google integrations or manage API keys in the app.
 
 4. Generate the Prisma client and create tables:
 
@@ -162,7 +184,7 @@ It lists any rows that would violate those constraints and exits non-zero until 
 1. Create a Node.js app in Plesk pointing at this project directory.
 2. Set the application startup file to `server.js`.
 3. Set the document root to the `public` subdirectory.
-4. Add the environment variables from `.env.example` in Plesk. Security and rate-limit values have conservative defaults, but should be set explicitly in production.
+4. Add the environment variables from `.env.example` in Plesk, including a generated `APP_SECRETS_ENCRYPTION_KEY` (an existing deployment keeps its `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` value instead, or rotates it as described under API Keys). Security and rate-limit values have conservative defaults, but should be set explicitly in production. Provider credentials can be left empty and saved from Settings after the first sign-in.
 5. Create the database in Plesk and use the connection string as `DATABASE_URL`.
 6. Run:
 
@@ -183,7 +205,7 @@ The exact `cd` path must be the application root shown by Plesk. The npm worker 
 
 ## DataForSEO Safety
 
-The integration defaults to Sandbox:
+Credentials come from **Settings → API keys** or, as a fallback, `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD`. The integration defaults to Sandbox:
 
 - `DATAFORSEO_SANDBOX=true`
 - `DATAFORSEO_LIVE_ENABLED=false`
