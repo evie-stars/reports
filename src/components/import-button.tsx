@@ -3,7 +3,8 @@
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/icon";
 
-export function GscImportButton({ hasData }: { hasData: boolean }) {
+/** Submit button for a 90-day Search Console or Analytics import, with a pending state. */
+export function ImportButton({ hasData }: { hasData: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button className="btn-primary" type="submit" disabled={pending}>

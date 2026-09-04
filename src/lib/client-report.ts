@@ -1,5 +1,6 @@
 import { Device, Prisma, ReportModule, SearchType } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { ANALYTICS_ORGANIC_CHANNEL, GA4_CHANNEL, GA4_DAILY_TOTAL } from "@/lib/google-analytics";
 
 export type ReportSearchParams = {
   section?: string;
@@ -67,7 +68,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
   };
   const gscCutoff = gscDateCutoff(filters.period);
 
-  const [queriedResults, gscSnapshots] = await Promise.all([
+  const [queriedResults, gscSnapshots, ga4Snapshots] = await Promise.all([
     prisma.rankResult.findMany({
       where,
       orderBy: { checkedAt: "desc" },
@@ -89,6 +90,19 @@ export async function getClientReportData(clientId: string, searchParams: Report
           clientId,
           gscPropertyUrl: { not: null },
           reportModules: { has: ReportModule.gsc },
+          ...(filters.projectId ? { id: filters.projectId } : {})
+        },
+        ...(gscCutoff ? { date: { gte: gscCutoff } } : {})
+      },
+      orderBy: { date: "asc" }
+    }),
+    prisma.ga4Snapshot.findMany({
+      where: {
+        dimension: { in: [GA4_DAILY_TOTAL, GA4_CHANNEL] },
+        project: {
+          clientId,
+          ga4PropertyId: { not: null },
+          reportModules: { has: ReportModule.ga4 },
           ...(filters.projectId ? { id: filters.projectId } : {})
         },
         ...(gscCutoff ? { date: { gte: gscCutoff } } : {})
@@ -165,13 +179,18 @@ export async function getClientReportData(clientId: string, searchParams: Report
       selectedProjects.some((project) => Boolean(project.gscPropertyUrl)),
       latestDate(selectedProjects.map((project) => project.gscLastImportedAt))
     ),
+    ga4: buildGa4Report(
+      ga4Snapshots,
+      selectedProjects.some((project) => Boolean(project.ga4PropertyId)),
+      latestDate(selectedProjects.map((project) => project.ga4LastImportedAt))
+    ),
     stats: buildStats(latestResults, activeKeywordCount),
     modules: {
       rankings: filters.section === "seo" ? seoEnabled : filters.section === "maps" ? mapsEnabled : seoEnabled || mapsEnabled,
       seo: seoEnabled,
       maps: mapsEnabled,
       gsc: filters.section !== "maps" && enabledModules.has(ReportModule.gsc),
-      ga4: enabledModules.has(ReportModule.ga4)
+      ga4: filters.section !== "maps" && enabledModules.has(ReportModule.ga4)
     },
     options: {
       projects: client.projects.map((project) => ({ id: project.id, name: project.name })),
@@ -422,6 +441,85 @@ export function buildGscReport(
       position: impressions > 0 ? weightedPosition / impressions : null
     },
     trend
+  };
+}
+
+export type Ga4SnapshotRow = {
+  date: Date;
+  dimension: string;
+  channel: string;
+  sessions: number;
+  activeUsers: number;
+  newUsers: number;
+  engagedSessions: number;
+  keyEvents: number;
+};
+
+/**
+ * Combine stored GA4 rows into the report shape. Sessions, new users, engaged sessions and key
+ * events are additive, so they are summed across days, channels and projects. Active users is a
+ * distinct count per row and is only ever shown per day (never summed into a period figure).
+ */
+export function buildGa4Report(snapshots: Ga4SnapshotRow[], mapped: boolean, lastImportedAt: Date | null) {
+  const days = new Map<string, { date: Date; sessions: number; activeUsers: number; newUsers: number; engagedSessions: number; keyEvents: number }>();
+  const channels = new Map<string, { channel: string; sessions: number; newUsers: number; keyEvents: number }>();
+
+  for (const snapshot of snapshots) {
+    if (snapshot.dimension === GA4_CHANNEL) {
+      const current = channels.get(snapshot.channel) ?? { channel: snapshot.channel, sessions: 0, newUsers: 0, keyEvents: 0 };
+      current.sessions += snapshot.sessions;
+      current.newUsers += snapshot.newUsers;
+      current.keyEvents += snapshot.keyEvents;
+      channels.set(snapshot.channel, current);
+    } else if (snapshot.dimension === GA4_DAILY_TOTAL) {
+      const key = isoDay(snapshot.date);
+      const current = days.get(key) ?? { date: snapshot.date, sessions: 0, activeUsers: 0, newUsers: 0, engagedSessions: 0, keyEvents: 0 };
+      current.sessions += snapshot.sessions;
+      current.activeUsers += snapshot.activeUsers;
+      current.newUsers += snapshot.newUsers;
+      current.engagedSessions += snapshot.engagedSessions;
+      current.keyEvents += snapshot.keyEvents;
+      days.set(key, current);
+    }
+  }
+
+  const trend = Array.from(days.values())
+    .sort((left, right) => left.date.getTime() - right.date.getTime())
+    .map((entry) => ({
+      date: isoDay(entry.date),
+      label: entry.date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
+      sessions: entry.sessions,
+      activeUsers: entry.activeUsers,
+      newUsers: entry.newUsers,
+      keyEvents: entry.keyEvents
+    }));
+  const sessions = trend.reduce((total, point) => total + point.sessions, 0);
+  const newUsers = trend.reduce((total, point) => total + point.newUsers, 0);
+  const engagedSessions = Array.from(days.values()).reduce((total, entry) => total + entry.engagedSessions, 0);
+  const keyEvents = trend.reduce((total, point) => total + point.keyEvents, 0);
+  const channelSessions = Array.from(channels.values()).reduce((total, channel) => total + channel.sessions, 0);
+  const organicSessions = channels.get(ANALYTICS_ORGANIC_CHANNEL)?.sessions ?? 0;
+
+  return {
+    mapped,
+    lastImportedAt,
+    latestDataDate: trend.at(-1)?.date ?? null,
+    stats: {
+      sessions,
+      newUsers,
+      engagedSessions,
+      engagementRate: sessions > 0 ? engagedSessions / sessions : null,
+      keyEvents,
+      organicSessions,
+      organicShare: channelSessions > 0 ? organicSessions / channelSessions : null,
+      averageDailyActiveUsers: trend.length > 0
+        ? trend.reduce((total, point) => total + point.activeUsers, 0) / trend.length
+        : null
+    },
+    trend,
+    channels: Array.from(channels.values())
+      .map((channel) => ({ ...channel, share: channelSessions > 0 ? channel.sessions / channelSessions : 0 }))
+      .sort((left, right) => right.sessions - left.sessions || left.channel.localeCompare(right.channel))
   };
 }
 

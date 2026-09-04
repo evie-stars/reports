@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
@@ -6,20 +5,16 @@ import {
   readSearchConsoleDailyRows,
   searchConsoleDateRange
 } from "@/lib/google-search-console";
+import { gscImportLockKey, withImportLock } from "@/lib/import-lock";
 
 const GSC_DAILY_TOTAL = "daily_total";
 
 export async function importProjectSearchConsoleData(projectId: string) {
-  const owner = randomUUID();
-  if (!(await acquireImportLock(projectId, owner))) {
-    throw new Error("A Search Console import is already running for this report.");
-  }
-
-  try {
-    return await importProjectSearchConsoleDataUnlocked(projectId);
-  } finally {
-    await releaseImportLock(projectId, owner);
-  }
+  return withImportLock(
+    gscImportLockKey(projectId),
+    "A Search Console import is already running for this report.",
+    () => importProjectSearchConsoleDataUnlocked(projectId)
+  );
 }
 
 async function importProjectSearchConsoleDataUnlocked(projectId: string) {
@@ -31,11 +26,14 @@ async function importProjectSearchConsoleDataUnlocked(projectId: string) {
   if (!project.gscConnection || !project.gscPropertyUrl) {
     throw new Error("Map a Search Console property before importing data.");
   }
+  // Every later write is keyed on the mapping that was loaded here, so a property change made
+  // while Google is answering can never file the old property's data under the new one.
+  const mapping = { id: projectId, gscConnectionId: project.gscConnection.id, gscPropertyUrl: project.gscPropertyUrl };
 
   const startedAt = new Date();
   const range = searchConsoleDateRange(90, startedAt);
-  await prisma.project.update({
-    where: { id: projectId },
+  await prisma.project.updateMany({
+    where: mapping,
     data: {
       gscImportStatus: "running",
       gscImportStartedAt: startedAt,
@@ -83,8 +81,8 @@ async function importProjectSearchConsoleDataUnlocked(projectId: string) {
           }))
         });
       }
-      await tx.project.update({
-        where: { id: projectId },
+      const updated = await tx.project.updateMany({
+        where: mapping,
         data: {
           gscImportStatus: "completed",
           gscLastImportedAt: importedAt,
@@ -94,8 +92,9 @@ async function importProjectSearchConsoleDataUnlocked(projectId: string) {
           gscImportError: null
         }
       });
-      await tx.googleSearchConsoleConnection.update({
-        where: { id: project.gscConnectionId as string },
+      if (updated.count === 0) throw new Error("The Search Console mapping changed while data was importing. Run the import again.");
+      await tx.googleConnection.updateMany({
+        where: { id: mapping.gscConnectionId },
         data: { lastValidatedAt: importedAt, lastError: null }
       });
     });
@@ -108,16 +107,15 @@ async function importProjectSearchConsoleDataUnlocked(projectId: string) {
     };
   } catch (error) {
     const message = errorMessage(error);
-    await prisma.$transaction([
-      prisma.project.update({
-        where: { id: projectId },
-        data: { gscImportStatus: "failed", gscImportError: message }
-      }),
-      prisma.googleSearchConsoleConnection.update({
-        where: { id: project.gscConnectionId as string },
-        data: { lastError: message }
-      })
-    ]);
+    // Separate statements: a connection that vanished mid-import must not stop the failure being recorded.
+    await prisma.project.updateMany({
+      where: mapping,
+      data: { gscImportStatus: "failed", gscImportError: message }
+    });
+    await prisma.googleConnection.updateMany({
+      where: { id: mapping.gscConnectionId },
+      data: { lastError: message }
+    });
     throw new Error(message);
   }
 }
@@ -140,31 +138,6 @@ async function logSearchConsoleRequest(
       errorMessage
     }
   });
-}
-
-async function acquireImportLock(projectId: string, owner: string) {
-  const key = importLockKey(projectId);
-  await prisma.systemLock.upsert({
-    where: { key },
-    create: { key, owner: null, lockedUntil: new Date(0) },
-    update: {}
-  });
-  const claimed = await prisma.systemLock.updateMany({
-    where: { key, lockedUntil: { lt: new Date() } },
-    data: { owner, lockedUntil: new Date(Date.now() + 10 * 60 * 1000) }
-  });
-  return claimed.count === 1;
-}
-
-async function releaseImportLock(projectId: string, owner: string) {
-  await prisma.systemLock.updateMany({
-    where: { key: importLockKey(projectId), owner },
-    data: { owner: null, lockedUntil: new Date(0) }
-  });
-}
-
-function importLockKey(projectId: string) {
-  return `gsc-import:${projectId}`;
 }
 
 function utcDate(value: string) {

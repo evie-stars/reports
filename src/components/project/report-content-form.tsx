@@ -44,8 +44,8 @@ export function ReportContentForm({
           <ModuleOption
             value="ga4"
             title="Google Analytics 4"
-            description="Available when the GA4 integration is connected"
-            disabled
+            description="Sessions, new users, engagement and key events"
+            defaultChecked={reportModules.includes("ga4")}
           />
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

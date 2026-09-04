@@ -5,12 +5,16 @@ import { writeRequestAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
 import { encryptGscToken } from "@/lib/gsc-crypto";
 import {
-  exchangeGoogleSearchConsoleCode,
+  droppedIntegrationProducts,
+  exchangeGoogleAuthorizationCode,
+  GOOGLE_INTEGRATION_PRODUCTS,
+  GOOGLE_OAUTH_COOKIE_PATH,
+  GOOGLE_OAUTH_PRODUCT_COOKIE,
+  GOOGLE_OAUTH_STATE_COOKIE,
   googleAccountForAccessToken,
-  googleSearchConsoleAppUrl,
-  GSC_OAUTH_STATE_COOKIE,
-  GSC_READONLY_SCOPE
-} from "@/lib/google-search-console";
+  googleIntegrationsAppUrl,
+  isGoogleIntegrationProduct
+} from "@/lib/google-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,21 +23,31 @@ export async function GET(request: NextRequest) {
   if (actor.role !== "admin") return new Response("Administrator access is required.", { status: 403 });
 
   const returnedState = request.nextUrl.searchParams.get("state") ?? "";
-  const storedState = request.cookies.get(GSC_OAUTH_STATE_COOKIE)?.value ?? "";
+  const storedState = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE)?.value ?? "";
+  const storedProduct = request.cookies.get(GOOGLE_OAUTH_PRODUCT_COOKIE)?.value ?? "";
+  const product = isGoogleIntegrationProduct(storedProduct) ? storedProduct : null;
+  const definition = product ? GOOGLE_INTEGRATION_PRODUCTS[product] : null;
   const oauthError = request.nextUrl.searchParams.get("error");
   const code = request.nextUrl.searchParams.get("code");
 
   try {
     if (oauthError) throw new Error(`Google connection was declined: ${oauthError}.`);
-    if (!statesMatch(returnedState, storedState)) throw new Error("Google connection state was invalid or expired. Please try again.");
+    if (!statesMatch(returnedState, storedState) || !product || !definition) {
+      throw new Error("Google connection state was invalid or expired. Please try again.");
+    }
     if (!code) throw new Error("Google did not return an authorization code.");
 
-    const tokens = await exchangeGoogleSearchConsoleCode(code);
-    if (!tokens.grantedScopes.includes(GSC_READONLY_SCOPE)) {
-      throw new Error("Read-only Search Console access was not granted.");
+    const tokens = await exchangeGoogleAuthorizationCode(code);
+    // Google lets the user untick individual scopes on the consent screen, and include_granted_scopes
+    // can echo back an earlier grant for the other product, so the requested scope is checked by name.
+    if (!tokens.grantedScopes.includes(definition.scope)) {
+      throw new Error(`Read-only ${definition.label} access was not granted.`);
     }
     const accountEmail = await googleAccountForAccessToken(tokens.accessToken);
-    const connection = await prisma.googleSearchConsoleConnection.upsert({
+    const existing = await prisma.googleConnection.findUnique({ where: { accountEmail }, select: { grantedScopes: true } });
+    // The response lists every scope the new refresh token can exercise, so it is stored verbatim.
+    const dropped = droppedIntegrationProducts(existing?.grantedScopes ?? [], tokens.grantedScopes);
+    const connection = await prisma.googleConnection.upsert({
       where: { accountEmail },
       create: {
         accountEmail,
@@ -52,25 +66,36 @@ export async function GET(request: NextRequest) {
       }
     });
     await writeRequestAudit({
-      event: "gsc.connected",
+      event: `${definition.auditPrefix}.connected`,
       actorEmail: actor.email,
       actorRole: actor.role,
-      entityType: "gscConnection",
+      entityType: "googleConnection",
       entityId: connection.id,
-      metadata: { accountEmail }
+      metadata: { accountEmail, grantedScopes: tokens.grantedScopes }
     });
-    return settingsRedirect(request, "connected");
+    if (dropped.length > 0) {
+      await writeRequestAudit({
+        event: "google.scopes_reduced",
+        outcome: "failure",
+        actorEmail: actor.email,
+        actorRole: actor.role,
+        entityType: "googleConnection",
+        entityId: connection.id,
+        metadata: { accountEmail, droppedProducts: dropped }
+      });
+    }
+    return settingsRedirect(request, { product, warning: dropped[0] ?? null });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Google Search Console could not be connected.";
+    const message = error instanceof Error ? error.message : "Google account could not be connected.";
     await writeRequestAudit({
-      event: "gsc.connected",
+      event: "google.connection_failed",
       outcome: "failure",
       actorEmail: actor.email,
       actorRole: actor.role,
-      entityType: "gscConnection",
-      metadata: { error: message }
+      entityType: "googleConnection",
+      metadata: { product, error: message }
     });
-    return settingsRedirect(request, null, message);
+    return settingsRedirect(request, { error: message });
   }
 }
 
@@ -79,17 +104,23 @@ function statesMatch(left: string, right: string) {
   return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-function settingsRedirect(request: NextRequest, state: string | null, error?: string) {
-  const url = googleSearchConsoleAppUrl("/settings");
-  if (state) url.searchParams.set("gsc", state);
-  if (error) url.searchParams.set("gscError", error);
+function settingsRedirect(
+  request: NextRequest,
+  outcome: { product?: string; warning?: string | null; error?: string }
+) {
+  const url = googleIntegrationsAppUrl("/settings");
+  if (outcome.product) url.searchParams.set("google", outcome.product);
+  if (outcome.warning) url.searchParams.set("googleWarning", outcome.warning);
+  if (outcome.error) url.searchParams.set("googleError", outcome.error);
   const response = NextResponse.redirect(url);
-  response.cookies.set(GSC_OAUTH_STATE_COOKIE, "", {
+  const expiredCookie = {
     expires: new Date(0),
     httpOnly: true,
-    path: "/api/integrations/google",
-    sameSite: "lax",
+    path: GOOGLE_OAUTH_COOKIE_PATH,
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production" || request.nextUrl.protocol === "https:"
-  });
+  };
+  response.cookies.set(GOOGLE_OAUTH_STATE_COOKIE, "", expiredCookie);
+  response.cookies.set(GOOGLE_OAUTH_PRODUCT_COOKIE, "", expiredCookie);
   return response;
 }

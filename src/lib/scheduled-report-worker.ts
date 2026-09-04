@@ -4,6 +4,7 @@ import {
   SearchType,
   type Project,
   type RankRun,
+  type ReportExecution,
   type ReportModuleRunStatus
 } from "@prisma/client";
 import { writeAuditLog } from "@/lib/audit";
@@ -11,7 +12,9 @@ import { estimateRankRunCost } from "@/lib/dataforseo-costs";
 import { errorMessage as describeError } from "@/lib/dataforseo-response";
 import { prisma } from "@/lib/db";
 import { configuredPositiveInteger } from "@/lib/env";
+import { importProjectAnalyticsData } from "@/lib/ga4-import";
 import { importProjectSearchConsoleData } from "@/lib/gsc-import";
+import { ga4ImportLockKey, gscImportLockKey, importLockHeld, isImportLockHeldError } from "@/lib/import-lock";
 import { enqueueScheduledRankRun, type QueueSelection } from "@/lib/rank-queue";
 import { deriveReportExecutionStatus, isTerminalReportExecutionStatus } from "@/lib/report-execution-status";
 import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
@@ -20,6 +23,59 @@ import { effectiveScheduleDay, scheduleIsDue } from "@/lib/schedules";
 type ScheduledProject = Project & {
   keywords: { id: string }[];
   locations: { id: string }[];
+};
+
+/**
+ * How one imported data source (Search Console, Analytics) is claimed, run, and recorded on a
+ * `ReportExecution`. The module status column on the execution row is the source of truth for
+ * retries; the per-report import lock only says whether an import is still alive.
+ */
+type ModuleImportAdapter = {
+  status: (execution: ReportExecution) => ReportModuleRunStatus;
+  lockKey: (projectId: string) => string;
+  claim: (execution: ReportExecution, from: ReportModuleRunStatus) => Promise<boolean>;
+  complete: (executionId: string, rowCount: number) => Promise<unknown>;
+  fail: (executionId: string, message: string) => Promise<unknown>;
+  requeue: (executionId: string) => Promise<unknown>;
+  run: (projectId: string) => Promise<{ rowCount: number }>;
+};
+
+const GSC_ADAPTER: ModuleImportAdapter = {
+  status: (execution) => execution.gscStatus,
+  lockKey: gscImportLockKey,
+  claim: async (execution, from) => {
+    const claimed = await prisma.reportExecution.updateMany({
+      where: { id: execution.id, gscStatus: from },
+      data: { gscStatus: "running", status: "running", startedAt: execution.startedAt ?? new Date() }
+    });
+    return claimed.count === 1;
+  },
+  complete: (id, rowCount) => prisma.reportExecution.update({
+    where: { id },
+    data: { gscStatus: "completed", gscRowsImported: rowCount, gscError: null }
+  }),
+  fail: (id, message) => prisma.reportExecution.update({ where: { id }, data: { gscStatus: "failed", gscError: message } }),
+  requeue: (id) => prisma.reportExecution.update({ where: { id }, data: { gscStatus: "queued" } }),
+  run: importProjectSearchConsoleData
+};
+
+const GA4_ADAPTER: ModuleImportAdapter = {
+  status: (execution) => execution.ga4Status,
+  lockKey: ga4ImportLockKey,
+  claim: async (execution, from) => {
+    const claimed = await prisma.reportExecution.updateMany({
+      where: { id: execution.id, ga4Status: from },
+      data: { ga4Status: "running", status: "running", startedAt: execution.startedAt ?? new Date() }
+    });
+    return claimed.count === 1;
+  },
+  complete: (id, rowCount) => prisma.reportExecution.update({
+    where: { id },
+    data: { ga4Status: "completed", ga4RowsImported: rowCount, ga4Error: null }
+  }),
+  fail: (id, message) => prisma.reportExecution.update({ where: { id }, data: { ga4Status: "failed", ga4Error: message } }),
+  requeue: (id) => prisma.reportExecution.update({ where: { id }, data: { ga4Status: "queued" } }),
+  run: importProjectAnalyticsData
 };
 
 export async function enqueueDueReportExecutions(now = new Date()) {
@@ -39,40 +95,45 @@ export async function enqueueDueReportExecutions(now = new Date()) {
   return queued;
 }
 
-export async function processScheduledReportExecutions(maxGscImports = configuredMaxGscImports()) {
+export async function processScheduledReportExecutions(options: { maxGscImports?: number; maxGa4Imports?: number } = {}) {
   const candidates = await prisma.reportExecution.findMany({
     where: { status: { in: ["queued", "running"] } },
     orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }]
   });
-  let gscImported = 0;
-  let gscFailed = 0;
-
-  for (const execution of candidates) {
-    if (gscImported + gscFailed >= maxGscImports || execution.gscStatus !== "queued") continue;
-    const claimed = await prisma.reportExecution.updateMany({
-      where: { id: execution.id, gscStatus: "queued" },
-      data: { gscStatus: "running", status: "running", startedAt: execution.startedAt ?? new Date() }
-    });
-    if (claimed.count === 0) continue;
-
-    try {
-      const result = await importProjectSearchConsoleData(execution.projectId);
-      await prisma.reportExecution.update({
-        where: { id: execution.id },
-        data: { gscStatus: "completed", gscRowsImported: result.rowCount, gscError: null }
-      });
-      gscImported += 1;
-    } catch (error) {
-      await prisma.reportExecution.update({
-        where: { id: execution.id },
-        data: { gscStatus: "failed", gscError: errorMessage(error) }
-      });
-      gscFailed += 1;
-    }
-  }
+  const gsc = await runModuleImports(candidates, GSC_ADAPTER, options.maxGscImports ?? configuredMaxImports("SCHEDULED_REPORT_MAX_GSC_IMPORTS"));
+  const ga4 = await runModuleImports(candidates, GA4_ADAPTER, options.maxGa4Imports ?? configuredMaxImports("SCHEDULED_REPORT_MAX_GA4_IMPORTS"));
 
   const transitions = await syncOpenExecutions();
-  return { gscImported, gscFailed, ...transitions };
+  return { gscImported: gsc.imported, gscFailed: gsc.failed, ga4Imported: ga4.imported, ga4Failed: ga4.failed, ...transitions };
+}
+
+async function runModuleImports(candidates: ReportExecution[], adapter: ModuleImportAdapter, maxImports: number) {
+  let imported = 0;
+  let failed = 0;
+
+  for (const execution of candidates) {
+    if (imported + failed >= maxImports) break;
+    const current = adapter.status(execution);
+    if (current !== "queued" && current !== "running") continue;
+    // A module left "running" by a worker that died is retried once its import lock has expired.
+    if (current === "running" && await importLockHeld(adapter.lockKey(execution.projectId))) continue;
+    if (!(await adapter.claim(execution, current))) continue;
+
+    try {
+      const result = await adapter.run(execution.projectId);
+      await adapter.complete(execution.id, result.rowCount);
+      imported += 1;
+    } catch (error) {
+      if (isImportLockHeldError(error)) {
+        // A manual import owns the lock right now; leave the month's report for the next worker run.
+        await adapter.requeue(execution.id);
+        continue;
+      }
+      await adapter.fail(execution.id, errorMessage(error));
+      failed += 1;
+    }
+  }
+  return { imported, failed };
 }
 
 async function createExecution(project: ScheduledProject, now: Date) {
@@ -92,6 +153,13 @@ async function createExecution(project: ScheduledProject, now: Date) {
   const hasRankings = hasRankTracking(modules);
   const hasGsc = modules.includes("gsc");
   const hasGa4 = modules.includes("ga4");
+  const gscMapped = Boolean(project.gscConnectionId && project.gscPropertyUrl);
+  const ga4Mapped = Boolean(project.ga4ConnectionId && project.ga4PropertyId);
+  // Imported modules are fully decided here; the module loops own those columns from now on.
+  const gscStatus: ReportModuleRunStatus = hasGsc ? (gscMapped ? "queued" : "blocked") : "not_selected";
+  const gscError = hasGsc && !gscMapped ? "Map a Search Console property before the scheduled report." : null;
+  const ga4Status: ReportModuleRunStatus = hasGa4 ? (ga4Mapped ? "queued" : "blocked") : "not_selected";
+  const ga4Error = hasGa4 && !ga4Mapped ? "Map a Google Analytics property before the scheduled report." : null;
 
   let executionId: string;
   try {
@@ -102,9 +170,10 @@ async function createExecution(project: ScheduledProject, now: Date) {
         scheduledFor,
         modules,
         rankingsStatus: hasRankings ? "queued" : "not_selected",
-        gscStatus: hasGsc ? "queued" : "not_selected",
-        ga4Status: hasGa4 ? "blocked" : "not_selected",
-        ga4Error: hasGa4 ? "Google Analytics 4 automation is not connected yet." : null
+        gscStatus,
+        gscError,
+        ga4Status,
+        ga4Error
       }
     });
     executionId = execution.id;
@@ -113,8 +182,10 @@ async function createExecution(project: ScheduledProject, now: Date) {
       const existing = await prisma.reportExecution.findUnique({
         where: { projectId_periodStart: { projectId: project.id, periodStart } }
       });
+      // A row whose rank run was never queued (crash between create and the update below) is
+      // resumed even if an import loop has already claimed one of its other modules.
       const staleInitialization = existing &&
-        existing.status === "queued" &&
+        (existing.status === "queued" || existing.status === "running") &&
         existing.rankingsStatus === "queued" &&
         !existing.rankRunId &&
         hasRankings &&
@@ -155,23 +226,15 @@ async function createExecution(project: ScheduledProject, now: Date) {
     }
   }
 
-  let gscStatus: ReportModuleRunStatus = hasGsc ? "queued" : "not_selected";
-  let gscError: string | null = null;
-  if (hasGsc && (!project.gscConnectionId || !project.gscPropertyUrl)) {
-    gscStatus = "blocked";
-    gscError = "Map a Search Console property before the scheduled report.";
-  }
-
-  const ga4Status: ReportModuleRunStatus = hasGa4 ? "blocked" : "not_selected";
-  const status = deriveReportExecutionStatus([rankingsStatus, gscStatus, ga4Status]);
+  // Module columns are re-read rather than rewritten: an import loop may already have claimed one.
+  const current = await prisma.reportExecution.findUniqueOrThrow({ where: { id: executionId } });
+  const status = deriveReportExecutionStatus([rankingsStatus, current.gscStatus, current.ga4Status]);
   await prisma.reportExecution.update({
     where: { id: executionId },
     data: {
       rankRunId,
       rankingsStatus,
       rankingsError,
-      gscStatus,
-      gscError,
       status,
       completedAt: isTerminalReportExecutionStatus(status) ? new Date() : null
     }
@@ -183,7 +246,7 @@ async function createExecution(project: ScheduledProject, now: Date) {
     actorRole: "system",
     entityType: "reportExecution",
     entityId: executionId,
-    metadata: { projectId: project.id, modules, rankingsError, gscError }
+    metadata: { projectId: project.id, modules, rankingsError, gscError: current.gscError, ga4Error: current.ga4Error }
   });
   return true;
 }
@@ -283,8 +346,8 @@ function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
-function configuredMaxGscImports() {
-  return configuredPositiveInteger("SCHEDULED_REPORT_MAX_GSC_IMPORTS", 2);
+function configuredMaxImports(name: string) {
+  return configuredPositiveInteger(name, 2);
 }
 
 function errorMessage(error: unknown) {

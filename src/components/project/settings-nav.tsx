@@ -7,6 +7,7 @@ export function SettingsNav({ showTesting }: { showTesting: boolean }) {
       <a href="#general" className={LINK_CLASS}>General</a>
       <a href="#report-content" className={LINK_CLASS}>Report content</a>
       <a href="#search-console" className={LINK_CLASS}>Search Console</a>
+      <a href="#analytics" className={LINK_CLASS}>Analytics</a>
       <a href="#schedule" className={LINK_CLASS}>Schedule</a>
       <a href="#tracking-lists" className={LINK_CLASS}>Keywords &amp; areas</a>
       {showTesting ? <a href="#testing" className={LINK_CLASS}>Testing</a> : null}

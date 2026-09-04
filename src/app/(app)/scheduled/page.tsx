@@ -27,6 +27,7 @@ export default async function ScheduledPage() {
     .sort((left, right) => left.nextRun.getTime() - right.nextRun.getTime());
   const nextSevenDays = rows.filter((row) => scheduleDateIsWithin(row.nextRun, 7)).length;
   const gscReports = rows.filter((row) => row.reportModules.includes("gsc")).length;
+  const ga4Reports = rows.filter((row) => row.reportModules.includes("ga4")).length;
   const needsAttention = rows.filter((project) => {
     const latest = project.reportExecutions[0];
     return latest && ["partial", "failed", "blocked"].includes(latest.status);
@@ -43,7 +44,8 @@ export default async function ScheduledPage() {
       <section className="flex flex-wrap gap-2.5 mb-6" aria-label="Schedule summary">
         <StatCard label="Scheduled reports" value={rows.length} icon="calendar" />
         <StatCard label="Next 7 days" value={nextSevenDays} icon="clock" tone={nextSevenDays > 0 ? "sky" : "default"} />
-        <StatCard label="With Search Console" value={gscReports} icon="zoom-in" />
+        <StatCard label="With Search Console" value={gscReports} icon="search" />
+        <StatCard label="With Analytics" value={ga4Reports} icon="zoom-in" />
         <StatCard label="Needs attention" value={needsAttention} icon="alert-circle" tone={needsAttention > 0 ? "blocked" : "default"} />
       </section>
 
@@ -97,6 +99,7 @@ export default async function ScheduledPage() {
                         <ModuleList
                           modules={project.reportModules}
                           gscMapped={Boolean(project.gscPropertyUrl)}
+                          ga4Mapped={Boolean(project.ga4PropertyId)}
                           legacyMaps={project.scheduleSearchTypes.includes("maps")}
                         />
                       </td>
@@ -107,7 +110,7 @@ export default async function ScheduledPage() {
                             <span className="table-sub">{plural(project._count.locations, "area")}</span>
                           </>
                         ) : (
-                          <span className="text-slate">Search Console only</span>
+                          <span className="text-slate">No rank tracking</span>
                         )}
                       </td>
                       <td>
@@ -186,7 +189,12 @@ export default async function ScheduledPage() {
                           detail={canEdit ? execution.gscError : null}
                           suffix={execution.gscStatus === "completed" ? `${execution.gscRowsImported} days` : undefined}
                         />
-                        <ModuleOutcome label="Analytics" status={execution.ga4Status} detail={canEdit ? execution.ga4Error : null} />
+                        <ModuleOutcome
+                          label="Analytics"
+                          status={execution.ga4Status}
+                          detail={canEdit ? execution.ga4Error : null}
+                          suffix={execution.ga4Status === "completed" ? `${execution.ga4RowsImported} days` : undefined}
+                        />
                       </div>
                     </td>
                     <td className="whitespace-nowrap">
@@ -227,7 +235,7 @@ async function getScheduleData() {
   }
 }
 
-function ModuleList({ modules, gscMapped, legacyMaps }: { modules: string[]; gscMapped: boolean; legacyMaps: boolean }) {
+function ModuleList({ modules, gscMapped, ga4Mapped, legacyMaps }: { modules: string[]; gscMapped: boolean; ga4Mapped: boolean; legacyMaps: boolean }) {
   return (
     <div className="flex flex-wrap gap-1">
       {modules.includes("rankings") ? <StatusPill dot={false} className={SMALL_PILL}>SEO</StatusPill> : null}
@@ -237,7 +245,11 @@ function ModuleList({ modules, gscMapped, legacyMaps }: { modules: string[]; gsc
           {gscMapped ? "Search Console" : "Search Console · needs mapping"}
         </StatusPill>
       ) : null}
-      {modules.includes("ga4") ? <StatusPill dot={false} className={SMALL_PILL}>Analytics</StatusPill> : null}
+      {modules.includes("ga4") ? (
+        <StatusPill dot={false} tone={ga4Mapped ? "accent" : "warn"} className={SMALL_PILL}>
+          {ga4Mapped ? "Analytics" : "Analytics · needs mapping"}
+        </StatusPill>
+      ) : null}
     </div>
   );
 }

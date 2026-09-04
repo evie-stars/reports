@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 
-type SnapshotModule = "rankings" | "maps" | "gsc";
+import type { SnapshotModule } from "@/lib/report-snapshot";
 
 export function SnapshotCreateForm({
   action,
@@ -52,13 +52,14 @@ export function SnapshotCreateForm({
             module="gsc"
             onChange={toggle}
           />
-          <label className="choice flex items-start rounded-xl border border-line p-3 opacity-50 cursor-not-allowed">
-            <input type="checkbox" disabled className="mt-0.5" />
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">Analytics</span>
-              <span className="block text-xs text-slate">Available after GA4 is connected</span>
-            </span>
-          </label>
+          <SnapshotOption
+            checked={selected.includes("ga4")}
+            description={availability.ga4 ? "Sessions, new users and key events" : "Map and import data first"}
+            enabled={availability.ga4}
+            label="Analytics"
+            module="ga4"
+            onChange={toggle}
+          />
         </div>
       </fieldset>
 

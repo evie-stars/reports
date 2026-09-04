@@ -7,7 +7,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { importRankHistoryCsv } from "@/lib/rank-history-import";
 import { actionRateLimit, shareRateLimit } from "@/lib/rate-limit";
-import { buildReportSnapshot, reportSnapshotSlug } from "@/lib/report-snapshot";
+import { buildReportSnapshot, isSnapshotModule, reportSnapshotSlug, SNAPSHOT_MODULES } from "@/lib/report-snapshot";
 import {
   auditAction,
   describeError,
@@ -27,7 +27,7 @@ const clientSchema = z.object({
 });
 
 const reportSnapshotSchema = z.object({
-  snapshotModules: z.array(z.enum(["rankings", "maps", "gsc"])).min(1, "Select at least one snapshot section."),
+  snapshotModules: z.array(z.enum(SNAPSHOT_MODULES)).min(1, "Select at least one snapshot section."),
   shareExpiryDays: z.coerce.number().int().refine((value) => (SHARE_EXPIRY_DAYS as readonly number[]).includes(value), "Choose a valid link lifetime.")
 });
 
@@ -168,7 +168,7 @@ export async function regenerateReportSnapshot(snapshotId: string, formData: For
   if (!snapshot) throw new Error("Snapshot not found.");
 
   const expiresAt = shareExpiry(formData);
-  const modules = snapshot.modules.filter((module): module is "rankings" | "maps" | "gsc" => module !== "ga4");
+  const modules = snapshot.modules.filter(isSnapshotModule);
   const payload = await buildReportSnapshot(snapshot.clientId, modules);
   const [, replacement] = await prisma.$transaction([
     prisma.reportSnapshot.update({ where: { id: snapshot.id }, data: { revokedAt: new Date() } }),

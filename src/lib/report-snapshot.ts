@@ -4,13 +4,20 @@ import { getClientReportData } from "@/lib/client-report";
 
 const snapshotPeriod = "180" as const satisfies NonNullable<ReportSearchParams["period"]>;
 
+export const SNAPSHOT_MODULES = ["rankings", "maps", "gsc", "ga4"] as const;
+export type SnapshotModule = (typeof SNAPSHOT_MODULES)[number];
+
+export function isSnapshotModule(value: string): value is SnapshotModule {
+  return (SNAPSHOT_MODULES as readonly string[]).includes(value);
+}
+
 type SnapshotSection = Pick<ClientReportViewData, "latestResults" | "stats" | "trend">;
 
 export type StoredReportSnapshot = {
   version: 1;
   clientName: string;
   generatedAt: string;
-  modules: Array<"rankings" | "maps" | "gsc">;
+  modules: SnapshotModule[];
   base: ClientReportViewData;
   sections: {
     seo?: SnapshotSection;
@@ -18,13 +25,11 @@ export type StoredReportSnapshot = {
   };
 };
 
-export async function buildReportSnapshot(
-  clientId: string,
-  modules: Array<"rankings" | "maps" | "gsc">
-): Promise<Prisma.InputJsonValue> {
+export async function buildReportSnapshot(clientId: string, modules: SnapshotModule[]): Promise<Prisma.InputJsonValue> {
   const wantsSeo = modules.includes("rankings");
   const wantsMaps = modules.includes("maps");
   const wantsGsc = modules.includes("gsc");
+  const wantsGa4 = modules.includes("ga4");
   const [overview, seo, maps] = await Promise.all([
     getClientReportData(clientId, { period: snapshotPeriod }),
     wantsSeo ? getClientReportData(clientId, { period: snapshotPeriod, section: "seo" }) : null,
@@ -42,12 +47,13 @@ export async function buildReportSnapshot(
     trend: overviewRankings?.trend ?? [],
     stats: overviewRankings?.stats ?? emptyRankStats(),
     gsc: wantsGsc ? overview.gsc : emptyGscReport(),
+    ga4: wantsGa4 ? overview.ga4 : emptyGa4Report(),
     modules: {
       rankings: wantsSeo || wantsMaps,
       seo: wantsSeo,
       maps: wantsMaps,
       gsc: wantsGsc && overview.gsc.mapped,
-      ga4: false
+      ga4: wantsGa4 && overview.ga4.mapped
     }
   } satisfies ClientReportViewData;
 
@@ -78,11 +84,17 @@ export function readReportSnapshot(payload: Prisma.JsonValue, requestedSection?:
   const sectionData = section === "seo" ? stored.sections.seo : section === "maps" ? stored.sections.maps : undefined;
   const report = {
     ...stored.base,
+    // Snapshots stored before the Analytics module existed carry no ga4 block.
+    ga4: stored.base.ga4 ?? emptyGa4Report(),
+    modules: { ...stored.base.modules, ga4: stored.base.modules.ga4 ?? false },
     filters: { ...stored.base.filters, section },
     ...(sectionData ?? {})
   } as ClientReportViewData;
 
-  if (section === "maps") report.gsc = emptyGscReport();
+  if (section === "maps") {
+    report.gsc = emptyGscReport();
+    report.ga4 = emptyGa4Report();
+  }
   return { stored, report };
 }
 
@@ -132,6 +144,26 @@ function emptyGscReport(): ClientReportViewData["gsc"] {
     lastImportedAt: null,
     stats: { clicks: 0, impressions: 0, ctr: null, position: null },
     trend: []
+  };
+}
+
+export function emptyGa4Report(): ClientReportViewData["ga4"] {
+  return {
+    mapped: false,
+    latestDataDate: null,
+    lastImportedAt: null,
+    stats: {
+      sessions: 0,
+      newUsers: 0,
+      engagedSessions: 0,
+      engagementRate: null,
+      keyEvents: 0,
+      organicSessions: 0,
+      organicShare: null,
+      averageDailyActiveUsers: null
+    },
+    trend: [],
+    channels: []
   };
 }
 
