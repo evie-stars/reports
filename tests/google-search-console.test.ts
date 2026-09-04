@@ -22,7 +22,7 @@ test("encrypts and decrypts Search Console refresh tokens", () => {
 test("rejects tampered Search Console refresh tokens", () => {
   const encrypted = encryptGscToken("refresh-token-value", encryptionKey);
   const parts = encrypted.split(".");
-  parts[3] = `${parts[3].slice(0, -1)}${parts[3].endsWith("a") ? "b" : "a"}`;
+  parts[3] = `${parts[3].startsWith("a") ? "b" : "a"}${parts[3].slice(1)}`;
 
   assert.throws(() => decryptGscToken(parts.join("."), encryptionKey));
 });

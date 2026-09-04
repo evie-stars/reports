@@ -2,6 +2,7 @@ import { Device, Prisma, ReportModule, SearchType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export type ReportSearchParams = {
+  section?: string;
   period?: string;
   project?: string;
   area?: string;
@@ -14,6 +15,7 @@ export type ReportSearchParams = {
 };
 
 export type ReportFilters = {
+  section: "overview" | "seo" | "maps";
   period: "30" | "90" | "180" | "all";
   projectId?: string;
   locationId?: string;
@@ -44,12 +46,15 @@ export async function getClientReportData(clientId: string, searchParams: Report
 
   const selectedProjects = client.projects.filter((project) => !filters.projectId || project.id === filters.projectId);
   const enabledModules = new Set(selectedProjects.flatMap((project) => project.reportModules));
+  const seoEnabled = enabledModules.has(ReportModule.rankings);
+  const mapsEnabled = selectedProjects.some((project) => project.reportModules.includes(ReportModule.maps) || legacyMapsEnabled(project));
+  const selectedSearchType = filters.section === "seo" ? SearchType.organic : filters.section === "maps" ? SearchType.maps : filters.searchType;
 
   const where: Prisma.RankResultWhereInput = {
     run: {
       sandbox: false,
       status: "completed",
-      project: { clientId, reportModules: { has: ReportModule.rankings } },
+      project: { clientId },
       ...(filters.projectId ? { projectId: filters.projectId } : {})
     },
     keyword: {
@@ -58,11 +63,11 @@ export async function getClientReportData(clientId: string, searchParams: Report
     },
     ...(filters.locationId ? { locationId: filters.locationId } : {}),
     ...(filters.device ? { device: filters.device } : {}),
-    searchType: filters.searchType ? filters.searchType : { in: [SearchType.organic, SearchType.maps] }
+    searchType: selectedSearchType ? selectedSearchType : { in: [SearchType.organic, SearchType.maps] }
   };
   const gscCutoff = gscDateCutoff(filters.period);
 
-  const [descendingResults, gscSnapshots] = await Promise.all([
+  const [queriedResults, gscSnapshots] = await Promise.all([
     prisma.rankResult.findMany({
       where,
       orderBy: { checkedAt: "desc" },
@@ -91,6 +96,13 @@ export async function getClientReportData(clientId: string, searchParams: Report
       orderBy: { date: "asc" }
     })
   ]);
+  const descendingResults = queriedResults.filter((result) => {
+    if (result.searchType === SearchType.organic) return result.run.project.reportModules.includes(ReportModule.rankings);
+    if (result.searchType === SearchType.maps) {
+      return result.run.project.reportModules.includes(ReportModule.maps) || legacyMapsEnabled(result.run.project);
+    }
+    return false;
+  });
 
   const histories = new Map<string, typeof descendingResults>();
   for (const result of descendingResults) {
@@ -136,7 +148,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
     new Map(client.projects.flatMap((project) => project.locations).map((location) => [location.id, location])).values()
   );
   const activeKeywordCount = client.projects
-    .filter((project) => (!filters.projectId || project.id === filters.projectId) && project.reportModules.includes(ReportModule.rankings))
+    .filter((project) => (!filters.projectId || project.id === filters.projectId) && projectSupportsSection(project, filters.section))
     .reduce(
       (total, project) => total + project.keywords.filter((keyword) => !filters.group || keyword.group === filters.group).length,
       0
@@ -155,8 +167,10 @@ export async function getClientReportData(clientId: string, searchParams: Report
     ),
     stats: buildStats(latestResults, activeKeywordCount),
     modules: {
-      rankings: enabledModules.has(ReportModule.rankings),
-      gsc: enabledModules.has(ReportModule.gsc),
+      rankings: filters.section === "seo" ? seoEnabled : filters.section === "maps" ? mapsEnabled : seoEnabled || mapsEnabled,
+      seo: seoEnabled,
+      maps: mapsEnabled,
+      gsc: filters.section !== "maps" && enabledModules.has(ReportModule.gsc),
       ga4: enabledModules.has(ReportModule.ga4)
     },
     options: {
@@ -172,17 +186,32 @@ export type CurrentReportResult = ClientReportData["latestResults"][number];
 
 function normalizeFilters(params: ReportSearchParams): ReportFilters {
   const period = params.period === "30" || params.period === "180" || params.period === "all" ? params.period : "90";
+  const section = params.section === "seo" || params.section === "maps" ? params.section : "overview";
   return {
+    section,
     period,
     projectId: clean(params.project),
     locationId: clean(params.area),
     device: params.device === "desktop" || params.device === "mobile" ? params.device : undefined,
-    searchType: params.type === "organic" || params.type === "local_finder" || params.type === "maps" ? params.type : undefined,
+    searchType: section === "overview" && (params.type === "organic" || params.type === "local_finder" || params.type === "maps") ? params.type : undefined,
     group: clean(params.group),
     keywordId: clean(params.keyword),
     sort: params.sort === "keyword" || params.sort === "area" ? params.sort : "current",
     sortDirection: params.dir === "desc" ? "desc" : "asc"
   };
+}
+
+function legacyMapsEnabled(project: { reportModules: ReportModule[]; scheduleSearchTypes: SearchType[] }) {
+  return !project.reportModules.includes(ReportModule.maps) && project.scheduleSearchTypes.includes(SearchType.maps);
+}
+
+function projectSupportsSection(
+  project: { reportModules: ReportModule[]; scheduleSearchTypes: SearchType[] },
+  section: ReportFilters["section"]
+) {
+  const seo = project.reportModules.includes(ReportModule.rankings);
+  const maps = project.reportModules.includes(ReportModule.maps) || legacyMapsEnabled(project);
+  return section === "seo" ? seo : section === "maps" ? maps : seo || maps;
 }
 
 function clean(value?: string) {

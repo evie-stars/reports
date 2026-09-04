@@ -80,7 +80,7 @@ const scheduleSchema = z.object({
   scheduleEnabled: z.boolean(),
   scheduleDay: z.coerce.number().int().min(1).max(28),
   scheduleDevices: z.array(z.enum(["desktop", "mobile"])).min(1),
-  scheduleSearchTypes: z.array(z.enum(["organic", "maps"])).min(1),
+  scheduleSearchTypes: z.array(z.enum(["organic", "maps"])).transform(uniqueValues),
   schedulePageLimit: z.coerce.number().int().min(1).max(10)
 });
 
@@ -90,7 +90,7 @@ const gscPropertySelectionSchema = z.object({
 });
 
 const reportModulesSchema = z.object({
-  reportModules: z.array(z.enum(["rankings", "gsc", "ga4"])).min(1, "Select at least one report section.")
+  reportModules: z.array(z.enum(["rankings", "maps", "gsc", "ga4"])).min(1, "Select at least one report section.")
 });
 
 const reportRequestSchema = z.object({
@@ -301,11 +301,16 @@ export async function updateProject(projectId: string, formData: FormData) {
 export async function updateProjectModules(projectId: string, formData: FormData) {
   const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = reportModulesSchema.parse({ reportModules: stringListFromForm(formData, "reportModules") });
+  const scheduleSearchTypes = [
+    ...(data.reportModules.includes("rankings") ? ["organic" as const] : []),
+    ...(data.reportModules.includes("maps") ? ["maps" as const] : [])
+  ];
   const project = await prisma.project.update({
     where: { id: projectId },
     data: {
       reportModules: data.reportModules,
-      ...(data.reportModules.includes("rankings") ? {} : { scheduleEnabled: false })
+      scheduleSearchTypes: scheduleSearchTypes.length > 0 ? scheduleSearchTypes : ["organic"],
+      ...(data.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc") ? {} : { scheduleEnabled: false })
     },
     select: { clientId: true }
   });
@@ -609,17 +614,35 @@ export async function updateProjectSchedule(projectId: string, formData: FormDat
     schedulePageLimit: stringFromForm(formData.get("schedulePageLimit"))
   });
   if (data.scheduleEnabled) {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { reportModules: true } });
-    if (!project?.reportModules.includes("rankings")) throw new Error("Enable SEO Rankings before scheduling this report.");
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { reportModules: true, gscConnectionId: true, gscPropertyUrl: true }
+    });
+    if (!project?.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc")) {
+      throw new Error("Enable SEO, Maps or Search Console before scheduling this report.");
+    }
+    if (project.reportModules.includes("gsc") && (!project.gscConnectionId || !project.gscPropertyUrl)) {
+      throw new Error("Map a Search Console property before enabling its monthly schedule.");
+    }
   }
-  await prisma.project.update({ where: { id: projectId }, data });
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { reportModules: true } });
+  if (!project) throw new Error("Report not found.");
+  const selectedSearchTypes = [
+    ...(project.reportModules.includes("rankings") ? ["organic" as const] : []),
+    ...(project.reportModules.includes("maps") ? ["maps" as const] : [])
+  ];
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { ...data, scheduleSearchTypes: selectedSearchTypes.length > 0 ? selectedSearchTypes : ["organic"] }
+  });
   await auditAction("project.schedule_updated", actor, "project", projectId, {
     enabled: data.scheduleEnabled,
     day: data.scheduleDay,
     devices: data.scheduleDevices,
-    searchTypes: data.scheduleSearchTypes
+    searchTypes: selectedSearchTypes
   });
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/scheduled");
 }
 
 export async function queueProjectRerun(clientId: string, formData: FormData) {
@@ -749,7 +772,7 @@ function shareExpiry(formData?: FormData) {
 function teamQueueError(message: string) {
   if (message.includes("days after its latest completed report")) return message;
   if (message === "This report is already queued or running.") return message;
-  if (message === "Report not found." || message === "SEO Rankings are not enabled for this report.") return message;
+  if (message === "Report not found." || message === "SEO and Maps rankings are not enabled for this report.") return message;
   return "This report could not be queued. A manager can review the reporting limits and configuration.";
 }
 

@@ -9,7 +9,7 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 - Default to DataForSEO Sandbox so setup and parser work does not spend trial credit.
 - Queue guarded live checks, ad hoc reports, and monthly schedules.
 - Restrict the reporting workspace with approved Google accounts and admin, manager, and team roles.
-- Provide the foundation for later GA4 and Google Search Console imports.
+- Import mapped Google Search Console data and retain the foundation for GA4.
 
 ## Sandbox Rank Checks
 
@@ -34,7 +34,9 @@ Organic checks can be capped between one and ten result pages, while Google Maps
 
 The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks. Team users cannot queue another full report within `RANK_TEAM_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; managers and administrators can override that cooldown.
 
-The Scheduled workspace lists every enabled monthly report, its next run date, keyword and area coverage, search depth, devices, result types, and enabled report data. Report content can currently include SEO Rankings and mapped Search Console data. GA4 appears as a planned module until that integration is connected.
+The Scheduled workspace lists every enabled monthly report, its next run date, coverage, search depth, devices, enabled data, and latest execution outcome. SEO, Maps, and Search Console can be toggled independently. The client report keeps them under one project but separates Overview, SEO, and Maps into focused views. GA4 appears as a planned module until that integration is connected.
+
+Each due schedule creates one coordinated execution record. The worker queues the selected SEO and Maps checks, refreshes a mapped Search Console property, and records each source separately. A report can therefore finish as partially successful without hiding the data that completed. In-app dashboard alerts surface failed, blocked, and partial executions to administrators. Existing scheduled rank runs from the current month are attached rather than submitted again.
 
 ## Keyword Demand
 
@@ -96,7 +98,7 @@ Generate the encryption key once with `openssl rand -hex 32`, store it with the 
 
 After deployment, open **Settings**, connect the Google account, then open a report's settings and select its Search Console property. The integration requests only `webmasters.readonly` access. Disconnecting in Report Hub removes the locally stored token and report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
-Mapped reports can manually import the previous 90 complete days of final Web search totals. One daily aggregate is stored per report with clicks, impressions, CTR, and average position. Re-running the import replaces that same date range, so refreshes are idempotent rather than additive. The client report displays the totals and a clicks/impressions trend using the same period and project filters as the ranking report. Each Google request is also recorded in the API audit with a zero cost. Manual imports are limited by `RATE_LIMIT_GSC_IMPORTS_PER_HOUR`.
+Mapped reports can manually import the previous 90 complete days of final Web search totals. Enabled monthly schedules refresh the same data automatically. One daily aggregate is stored per report with clicks, impressions, CTR, and average position. Re-running the import replaces that same date range, so refreshes are idempotent rather than additive. The client report displays the totals and a clicks/impressions trend using the same period and project filters as the ranking report. Each Google request is also recorded in the API audit with a zero cost. Manual imports are limited by `RATE_LIMIT_GSC_IMPORTS_PER_HOUR`; scheduled worker invocations process at most `SCHEDULED_REPORT_MAX_GSC_IMPORTS` imports at once.
 
 ## Local Setup
 
@@ -147,10 +149,10 @@ Mapped reports can manually import the previous 90 complete days of final Web se
 7. Add a Plesk Scheduled Task every five minutes:
 
    ```bash
-   cd /var/www/vhosts/reports.starwebsites.co.uk && npm run rank:worker
+   cd /var/www/vhosts/starwebsites.co.uk/reports.starwebsites.co.uk && npm run rank:worker
    ```
 
-The exact `cd` path must be the application root shown by Plesk. The worker enqueues due monthly schedules, submits or collects Standard ranking tasks, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
+The exact `cd` path must be the application root shown by Plesk. The npm worker command explicitly loads the application `.env`, matching the command that was verified on the Plesk server. The worker creates due report executions, submits or collects Standard ranking tasks, refreshes scheduled Search Console data, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
 
 ## DataForSEO Safety
 

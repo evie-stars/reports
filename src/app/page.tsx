@@ -29,14 +29,15 @@ export default async function DashboardPage() {
       </header>
 
       {data.dbUnavailable ? <SetupNotice /> : null}
-      {!data.dbUnavailable && (data.failedRuns > 0 || !worker.healthy) ? (
+      {!data.dbUnavailable && (data.failedRuns > 0 || data.failedScheduledReports > 0 || !worker.healthy) ? (
         <div className="notice danger-notice operations-alert">
           <strong>Operations need attention.</strong>
           <span>
             {data.failedRuns > 0 ? ` ${data.failedRuns} report job${data.failedRuns === 1 ? " has" : "s have"} failed or been blocked in the last 7 days.` : ""}
+            {data.failedScheduledReports > 0 ? ` ${data.failedScheduledReports} automated report${data.failedScheduledReports === 1 ? " needs" : "s need"} attention.` : ""}
             {!worker.healthy ? ` The rank worker is ${worker.label.toLowerCase()}.` : ""}
           </span>
-          <Link href="/runs">Review rank runs</Link>
+          <Link href={data.failedScheduledReports > 0 ? "/scheduled" : "/runs"}>Review activity</Link>
         </div>
       ) : null}
 
@@ -53,6 +54,7 @@ export default async function DashboardPage() {
           <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
           <ConfigurationItem label="Failed jobs" value={data.failedRuns ? `${data.failedRuns} in 7 days` : "None"} good={data.failedRuns === 0} />
           <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
+          <ConfigurationItem label="Scheduled reports" value={data.failedScheduledReports ? `${data.failedScheduledReports} need attention` : "Healthy"} good={data.failedScheduledReports === 0} />
         </div>
       </section>
 
@@ -202,7 +204,7 @@ export default async function DashboardPage() {
 async function getDashboardData() {
   try {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, users] = await Promise.all([
+    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, runs, reportRequests, users] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
@@ -210,6 +212,7 @@ async function getDashboardData() {
       prisma.project.count({ where: { scheduleEnabled: true } }),
       prisma.rankRun.count({ where: { status: { in: ["queued", "running"] } } }),
       prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
+      prisma.reportExecution.count({ where: { status: { in: ["partial", "failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
       prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
       prisma.rankRun.findMany({
         orderBy: { createdAt: "desc" },
@@ -220,7 +223,7 @@ async function getDashboardData() {
       prisma.userAccess.findMany({ orderBy: [{ enabled: "desc" }, { name: "asc" }, { email: "asc" }] })
     ]);
 
-    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, users, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, runs, reportRequests, users, dbUnavailable: false };
   } catch {
     return {
       clients: 0,
@@ -230,6 +233,7 @@ async function getDashboardData() {
       schedules: 0,
       queuedRuns: 0,
       failedRuns: 0,
+      failedScheduledReports: 0,
       heartbeat: null,
       runs: [],
       reportRequests: [],

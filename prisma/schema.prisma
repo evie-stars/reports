@@ -75,8 +75,27 @@ enum GscImportStatus {
 
 enum ReportModule {
   rankings
+  maps
   gsc
   ga4
+}
+
+enum ReportExecutionStatus {
+  queued
+  running
+  completed
+  partial
+  failed
+  blocked
+}
+
+enum ReportModuleRunStatus {
+  not_selected
+  queued
+  running
+  completed
+  failed
+  blocked
 }
 
 enum ReportRequestStatus {
@@ -133,6 +152,33 @@ model ReportRequest {
   @@index([requestedByEmail, createdAt])
 }
 
+model ReportExecution {
+  id              String                   @id @default(cuid())
+  projectId       String
+  periodStart     DateTime
+  scheduledFor    DateTime
+  modules         ReportModule[]
+  status          ReportExecutionStatus    @default(queued)
+  rankingsStatus  ReportModuleRunStatus    @default(not_selected)
+  gscStatus       ReportModuleRunStatus    @default(not_selected)
+  ga4Status       ReportModuleRunStatus    @default(not_selected)
+  rankRunId       String?                  @unique
+  rankingsError   String?
+  gscError        String?
+  ga4Error        String?
+  gscRowsImported Int                      @default(0)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  project         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rankRun         RankRun?                 @relation(fields: [rankRunId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, periodStart])
+  @@index([status, scheduledFor])
+  @@index([projectId, createdAt])
+}
+
 model Project {
   id                             String                         @id @default(cuid())
   clientId                       String
@@ -145,7 +191,7 @@ model Project {
   scheduleDevices                Device[]                       @default([desktop])
   scheduleSearchTypes            SearchType[]                   @default([organic])
   schedulePageLimit              Int                            @default(10)
-  reportModules                  ReportModule[]                  @default([rankings, gsc])
+  reportModules                  ReportModule[]                  @default([rankings, maps, gsc])
   keywordMetricsStatus           KeywordMetricsStatus           @default(idle)
   keywordMetricsTaskId           String?
   keywordMetricsRequestedAt      DateTime?
@@ -175,6 +221,7 @@ model Project {
   competitors                    Competitor[]
   rankRuns                       RankRun[]
   gscSnapshots                   GscSnapshot[]
+  reportExecutions               ReportExecution[]
 
   @@index([clientId])
   @@index([gscConnectionId])
@@ -273,6 +320,7 @@ model RankRun {
   apiRequests      ApiRequest[]
   results          RankResult[]
   rankTasks        RankTask[]
+  reportExecution  ReportExecution?
 
   @@index([projectId, createdAt])
   @@index([status, availableAt, createdAt])

@@ -19,10 +19,16 @@ export function ClientReportDashboard({
 
   return (
     <>
+      <nav className="report-view-tabs" aria-label="Report sections">
+        <Link aria-current={filters.section === "overview" ? "page" : undefined} className={filters.section === "overview" ? "active" : ""} href={reportHref(basePath, { ...filters, section: "overview", searchType: undefined })}>Overview</Link>
+        {data.modules.seo ? <Link aria-current={filters.section === "seo" ? "page" : undefined} className={filters.section === "seo" ? "active" : ""} href={reportHref(basePath, { ...filters, section: "seo", searchType: undefined })}>SEO</Link> : null}
+        {data.modules.maps ? <Link aria-current={filters.section === "maps" ? "page" : undefined} className={filters.section === "maps" ? "active" : ""} href={reportHref(basePath, { ...filters, section: "maps", searchType: undefined })}>Maps</Link> : null}
+      </nav>
+
       {data.modules.rankings ? <section className="report-stat-grid" aria-label="Ranking summary">
-        <ReportStat label="Top 3 Keywords" value={stats.topThree} detail="Highest visibility" tone="blue" />
-        <ReportStat label="Page 1 Keywords" value={stats.pageOne} detail={`of ${stats.activeKeywords} active`} tone="green" />
-        <ReportStat label="Top 20 Keywords" value={stats.topTwenty} detail="Within two pages" tone="dark" />
+        <ReportStat label={filters.section === "maps" ? "Top 3 Map Rankings" : "Top 3 Keywords"} value={stats.topThree} detail="Highest visibility" tone="blue" />
+        <ReportStat label={filters.section === "maps" ? "Top 10 Map Rankings" : "Page 1 Keywords"} value={stats.pageOne} detail={`of ${stats.activeKeywords} active`} tone="green" />
+        <ReportStat label={filters.section === "maps" ? "Top 20 Map Rankings" : "Top 20 Keywords"} value={stats.topTwenty} detail="Within two pages" tone="dark" />
         <ReportStat
           label="Average Position"
           value={stats.averageRank ?? "-"}
@@ -35,7 +41,7 @@ export function ClientReportDashboard({
         <div className="section-heading report-section-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Ranking Progress</p>
-            <h3>Keyword position distribution</h3>
+            <h3>{filters.section === "maps" ? "Maps position distribution" : "Keyword position distribution"}</h3>
           </div>
           <div className="movement-summary" aria-label="Latest movement summary">
             <span className="movement-count up">{stats.improved} improved</span>
@@ -52,6 +58,7 @@ export function ClientReportDashboard({
       ) : null}
 
       {data.modules.rankings ? <form className="report-filters spaced-section" action={basePath} method="get">
+        {filters.section !== "overview" ? <input type="hidden" name="section" value={filters.section} /> : null}
         <input type="hidden" name="sort" value={filters.sort} />
         <input type="hidden" name="dir" value={filters.sortDirection} />
         <FilterSelect label="Period" name="period" value={filters.period}>
@@ -73,11 +80,11 @@ export function ClientReportDashboard({
           <option value="desktop">Desktop</option>
           <option value="mobile">Mobile</option>
         </FilterSelect>
-        <FilterSelect label="Result" name="type" value={filters.searchType ?? ""}>
+        {filters.section === "overview" && data.modules.seo && data.modules.maps ? <FilterSelect label="Result" name="type" value={filters.searchType ?? ""}>
           <option value="">All results</option>
           <option value="organic">Organic</option>
           <option value="maps">Maps</option>
-        </FilterSelect>
+        </FilterSelect> : null}
         {data.options.groups.length > 0 ? (
           <FilterSelect label="Group" name="group" value={filters.group ?? ""}>
             <option value="">All groups</option>
@@ -537,6 +544,7 @@ function RankHistoryChart({ history }: { history: RankMatrixResult[] }) {
 
 function reportHref(basePath: string, filters: ClientReportData["filters"], keywordId?: string) {
   const params = new URLSearchParams();
+  if (filters.section !== "overview") params.set("section", filters.section);
   if (filters.period !== "90") params.set("period", filters.period);
   if (filters.projectId) params.set("project", filters.projectId);
   if (filters.locationId) params.set("area", filters.locationId);

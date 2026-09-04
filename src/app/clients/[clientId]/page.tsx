@@ -17,6 +17,7 @@ import { getClientReportData, type ReportSearchParams } from "@/lib/client-repor
 import { canManageReports, currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { estimateRankRunCost } from "@/lib/dataforseo-costs";
+import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
 import type { AppRole } from "../../../../auth";
 
 export const dynamic = "force-dynamic";
@@ -145,14 +146,14 @@ export default async function ClientDetailPage({ params, searchParams }: {
       <ClientHeader
         clientId={client.id}
         clientName={client.name}
-        projects={client.projects.filter((project) => project.reportModules.includes("rankings")).map((project) => ({
+        projects={client.projects.filter((project) => hasRankTracking(project.reportModules) || project.scheduleSearchTypes.includes("maps")).map((project) => ({
           id: project.id,
           name: project.name,
           estimatedCostUsd: estimateRankRunCost({
             keywordCount: project.keywords.length,
             locationCount: project.locations.length,
             devices: project.scheduleDevices,
-            searchTypes: project.scheduleSearchTypes,
+            searchTypes: enabledRankSearchTypes(project.reportModules, project.scheduleSearchTypes),
             pageLimit: project.schedulePageLimit
           }, "standard")
         }))}

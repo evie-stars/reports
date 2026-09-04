@@ -8,6 +8,7 @@ import { assertBudgetAvailable, estimateRankRunCost } from "@/lib/dataforseo-cos
 import { prisma } from "@/lib/db";
 import { executeQueuedRankRun, type RankRunSelection } from "@/lib/rank-runner";
 import { collectStandardRankRuns, submitStandardRankRun } from "@/lib/rank-standard";
+import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
 
 const queueSelectionSchema = z.object({
   projectId: z.string().min(1),
@@ -18,10 +19,14 @@ const queueSelectionSchema = z.object({
   pageLimit: z.number().int().min(1).max(10)
 });
 
-type QueueSelection = z.infer<typeof queueSelectionSchema>;
+export type QueueSelection = z.infer<typeof queueSelectionSchema>;
 
 export async function enqueueVerification(selection: QueueSelection, requestedByEmail: string) {
   return enqueueSelection(selection, "verification", requestedByEmail);
+}
+
+export async function enqueueScheduledRankRun(selection: QueueSelection) {
+  return enqueueSelection(selection, "scheduled", "scheduler");
 }
 
 export async function enqueueProjectRerun(input: {
@@ -37,7 +42,7 @@ export async function enqueueProjectRerun(input: {
     }
   });
   if (!project) throw new Error("Report not found.");
-  if (!project.reportModules.includes("rankings")) throw new Error("SEO Rankings are not enabled for this report.");
+  if (!hasRankTracking(project.reportModules)) throw new Error("SEO and Maps rankings are not enabled for this report.");
 
   if (input.role === "team") await assertTeamCooldown(project.id);
 
@@ -51,7 +56,7 @@ export async function enqueueProjectRerun(input: {
     keywordIds: project.keywords.map(({ id }) => id),
     locationIds: project.locations.map(({ id }) => id),
     devices: project.scheduleDevices,
-    searchTypes: currentSearchTypes(project.scheduleSearchTypes),
+    searchTypes: enabledRankSearchTypes(project.reportModules, project.scheduleSearchTypes),
     pageLimit: project.schedulePageLimit
   }, "manual", input.requestedByEmail);
 }
@@ -97,87 +102,24 @@ export async function retryRankRun(runId: string, requestedByEmail: string) {
   const run = await prisma.rankRun.findUnique({ where: { id: runId } });
   if (!run || !["failed", "blocked"].includes(run.status)) throw new Error("Only failed or blocked reports can be retried.");
   const selection = queueSelectionSchema.parse(run.selection);
-  return enqueueSelection(
+  const replacementId = await enqueueSelection(
     { ...selection, searchTypes: currentSearchTypes(selection.searchTypes) },
     run.source === "scheduled" ? "scheduled" : "manual",
     requestedByEmail
   );
-}
-
-export async function enqueueDueSchedules(now = new Date()) {
-  const projects = await prisma.project.findMany({
-    where: { scheduleEnabled: true, scheduleDay: { lte: now.getUTCDate() } },
-    include: {
-      keywords: { where: { active: true }, select: { id: true } },
-      locations: { where: { active: true }, select: { id: true } }
-    }
-  });
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  let queued = 0;
-
-  for (const project of projects) {
-    const existing = await prisma.rankRun.findFirst({
-      where: { projectId: project.id, source: "scheduled", createdAt: { gte: monthStart } }
+  if (run.source === "scheduled") {
+    await prisma.reportExecution.updateMany({
+      where: { rankRunId: run.id },
+      data: {
+        rankRunId: replacementId,
+        rankingsStatus: "queued",
+        rankingsError: null,
+        status: "queued",
+        completedAt: null
+      }
     });
-    if (existing || project.keywords.length === 0 || project.locations.length === 0) continue;
-
-    const selection = {
-      projectId: project.id,
-      keywordIds: project.keywords.map(({ id }) => id),
-      locationIds: project.locations.map(({ id }) => id),
-      devices: project.scheduleDevices,
-      searchTypes: currentSearchTypes(project.scheduleSearchTypes),
-      pageLimit: project.schedulePageLimit
-    };
-    const requestedTasks = selection.keywordIds.length * selection.locationIds.length *
-      selection.devices.length * selection.searchTypes.length;
-    const estimatedCostUsd = estimateRankRunCost({
-      keywordCount: selection.keywordIds.length,
-      locationCount: selection.locationIds.length,
-      devices: selection.devices,
-      searchTypes: selection.searchTypes,
-      pageLimit: selection.pageLimit
-    }, "standard");
-
-    try {
-      const runId = await enqueueSelection(selection, "scheduled", "scheduler");
-      await writeAuditLog({
-        event: "report.scheduled_queued",
-        actorEmail: "scheduler",
-        actorRole: "system",
-        entityType: "rankRun",
-        entityId: runId,
-        metadata: { projectId: project.id, requestedTasks }
-      });
-      queued += 1;
-    } catch (error) {
-      const blocked = await prisma.rankRun.create({
-        data: {
-          projectId: project.id,
-          status: "blocked",
-          sandbox: false,
-          source: "scheduled",
-          deliveryMethod: "standard",
-          requestedByEmail: "scheduler",
-          requestedTasks,
-          estimatedCostUsd,
-          selection: selection as Prisma.InputJsonValue,
-          lastError: errorMessage(error),
-          notes: `Monthly schedule blocked: ${errorMessage(error)}`
-        }
-      });
-      await writeAuditLog({
-        event: "report.scheduled_blocked",
-        outcome: "failure",
-        actorEmail: "scheduler",
-        actorRole: "system",
-        entityType: "rankRun",
-        entityId: blocked.id,
-        metadata: { projectId: project.id, error: errorMessage(error) }
-      });
-    }
   }
-  return queued;
+  return replacementId;
 }
 
 export async function processRankQueue(maxJobs = configuredMaxJobs()) {
@@ -296,7 +238,7 @@ function rankSelection(selection: QueueSelection): RankRunSelection {
   };
 }
 
-function currentSearchTypes(searchTypes: SearchType[]) {
+export function currentSearchTypes(searchTypes: SearchType[]) {
   const filtered = searchTypes.filter((searchType) => searchType !== SearchType.local_finder);
   return filtered.length > 0 ? filtered : [SearchType.organic];
 }

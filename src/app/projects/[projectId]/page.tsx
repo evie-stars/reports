@@ -27,6 +27,7 @@ import {
   listSearchConsoleSites,
   type SearchConsoleSite
 } from "@/lib/google-search-console";
+import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +91,8 @@ export default async function ProjectDetailPage({
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const metricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
-  const scheduledSearchTypes = project.scheduleSearchTypes.filter((type) => type !== "local_finder");
+  const scheduledSearchTypes = enabledRankSearchTypes(project.reportModules, project.scheduleSearchTypes);
+  const rankingsSelected = hasRankTracking(project.reportModules);
   const scheduleEstimate = estimateRankRunCost({
     keywordCount: activeKeywords.length,
     locationCount: activeLocations.length,
@@ -182,7 +184,11 @@ export default async function ProjectDetailPage({
         <div className="report-module-grid">
           <label className="report-module-option">
             <input name="reportModules" type="checkbox" value="rankings" defaultChecked={project.reportModules.includes("rankings")} />
-            <span><strong>SEO Rankings</strong><small>Keyword positions, movement, URLs and Maps results</small></span>
+            <span><strong>SEO</strong><small>Organic keyword positions, movement and ranked landing pages</small></span>
+          </label>
+          <label className="report-module-option">
+            <input name="reportModules" type="checkbox" value="maps" defaultChecked={project.reportModules.includes("maps") || project.scheduleSearchTypes.includes("maps")} />
+            <span><strong>Maps</strong><small>Google Maps positions across the selected areas and devices</small></span>
           </label>
           <label className="report-module-option">
             <input name="reportModules" type="checkbox" value="gsc" defaultChecked={project.reportModules.includes("gsc")} />
@@ -194,7 +200,7 @@ export default async function ProjectDetailPage({
           </label>
         </div>
         <div className="schedule-footer">
-          <p className="muted form-note">Turning off SEO Rankings also pauses the ranking schedule.</p>
+          <p className="muted form-note">The monthly schedule runs each selected and connected data source together.</p>
           <SubmitButton pendingLabel="Saving content...">Save Report Content</SubmitButton>
         </div>
       </form>
@@ -258,57 +264,62 @@ export default async function ProjectDetailPage({
         {gscProperties.error && gscProperties.options.length > 0 ? <p className="danger-text gsc-property-error">{gscProperties.error}</p> : null}
       </section>
 
-      {project.reportModules.includes("rankings") ? <form className="card form schedule-card spaced-section" action={updateScheduleWithId} id="schedule">
+      {project.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc") ? <form className="card form schedule-card spaced-section" action={updateScheduleWithId} id="schedule">
         <div className="section-heading compact-heading">
           <div>
             <p className="label label-with-icon"><Icon name="settings" />Monthly Schedule</p>
-            <h3>Automated rank report</h3>
+            <h3>Automated monthly report</h3>
           </div>
           <label className="toggle-field">
             <input name="scheduleEnabled" type="checkbox" defaultChecked={project.scheduleEnabled} />
             <span>Enabled</span>
           </label>
         </div>
-        <div className="schedule-grid">
+        <div className={`schedule-grid ${rankingsSelected ? "" : "schedule-grid-single"}`}>
           <label>
             Day of month
             <select name="scheduleDay" defaultValue={project.scheduleDay}>
               {Array.from({ length: 28 }, (_, index) => index + 1).map((day) => <option key={day} value={day}>{day}</option>)}
             </select>
           </label>
-          <label>
+          {rankingsSelected ? <label>
             Pages to search
             <select name="schedulePageLimit" defaultValue={project.schedulePageLimit}>
               {Array.from({ length: 10 }, (_, index) => index + 1).map((page) => <option key={page} value={page}>{page}</option>)}
             </select>
-          </label>
-          <fieldset className="choice-group">
+          </label> : null}
+          {rankingsSelected ? <fieldset className="choice-group">
             <legend>Devices</legend>
             <div className="choice-list horizontal">
               <label><input name="scheduleDevices" type="checkbox" value="desktop" defaultChecked={project.scheduleDevices.includes("desktop")} />Desktop</label>
               <label><input name="scheduleDevices" type="checkbox" value="mobile" defaultChecked={project.scheduleDevices.includes("mobile")} />Mobile</label>
             </div>
-          </fieldset>
-          <fieldset className="choice-group">
-            <legend>Results</legend>
-            <div className="choice-list horizontal">
-              <label><input name="scheduleSearchTypes" type="checkbox" value="organic" defaultChecked={project.scheduleSearchTypes.includes("organic")} />Organic</label>
-              <label><input name="scheduleSearchTypes" type="checkbox" value="maps" defaultChecked={project.scheduleSearchTypes.includes("maps")} />Maps</label>
-            </div>
-          </fieldset>
+          </fieldset> : null}
+          {scheduledSearchTypes.map((type) => <input key={type} type="hidden" name="scheduleSearchTypes" value={type} />)}
+          {!rankingsSelected ? (
+            <>
+              <input type="hidden" name="schedulePageLimit" value={project.schedulePageLimit} />
+              {project.scheduleDevices.map((device) => <input key={device} type="hidden" name="scheduleDevices" value={device} />)}
+            </>
+          ) : null}
         </div>
         <div className="schedule-footer">
           <p className="muted form-note">
-            Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * Math.max(1, scheduledSearchTypes.length)} Standard task(s). Maximum estimate: ${scheduleEstimate.toFixed(4)} per report.
+            {rankingsSelected
+              ? `${scheduledSearchTypes.map((type) => type === "organic" ? "SEO" : "Maps").join(" + ")}: ${activeKeywords.length * activeLocations.length * project.scheduleDevices.length * Math.max(1, scheduledSearchTypes.length)} Standard task(s), maximum estimate $${scheduleEstimate.toFixed(4)}. `
+              : ""}
+            {project.reportModules.includes("gsc")
+              ? `Search Console: ${project.gscPropertyUrl ? "mapped and ready" : "property mapping required"}.`
+              : ""}
           </p>
           <SubmitButton pendingLabel="Saving schedule...">Save Schedule</SubmitButton>
         </div>
       </form> : (
         <section className="card spaced-section compact-empty-section" id="schedule">
           <div className="section-heading compact-heading">
-            <div><p className="label label-with-icon"><Icon name="calendar" />Monthly Schedule</p><h3>Ranking schedule paused</h3></div>
+            <div><p className="label label-with-icon"><Icon name="calendar" />Monthly Schedule</p><h3>No schedulable data selected</h3></div>
           </div>
-          <p className="compact-empty-copy">Enable SEO Rankings in Report Content before scheduling ranking checks.</p>
+          <p className="compact-empty-copy">Enable SEO Rankings or Search Console in Report Content before scheduling reports.</p>
         </section>
       )}
 
