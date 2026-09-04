@@ -12,6 +12,7 @@ import { ClientReportDashboard } from "@/components/client-report-dashboard";
 import { CopyShareLink } from "@/components/copy-share-link";
 import { CopyShareButton } from "@/components/copy-share-button";
 import { Icon } from "@/components/icon";
+import { SubmitButton } from "@/components/submit-button";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
 import { currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
@@ -66,7 +67,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
               <p className="label label-with-icon"><Icon name="contacts" />Client Details</p>
               <label>Client name<input name="name" required defaultValue={client.name} /></label>
               <label>Notes<textarea name="notes" rows={4} defaultValue={client.notes ?? ""} /></label>
-              <button className="button" type="submit">Save Client</button>
+              <SubmitButton pendingLabel="Saving client...">Save Client</SubmitButton>
             </form>
 
             <form className="card form" action={createProject}>
@@ -76,7 +77,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
               <label>Domain<input name="domain" required placeholder="example.co.uk" /></label>
               <label>Target business name<input name="targetBusinessName" placeholder="Example Local Business" /></label>
               <label>Service area<input name="serviceArea" placeholder="North West" /></label>
-              <button className="button" type="submit">Create Report</button>
+              <SubmitButton pendingLabel="Creating report...">Create Report</SubmitButton>
             </form>
           </div>
 
@@ -92,10 +93,10 @@ export default async function ClientDetailPage({ params, searchParams }: {
                 <span className="share-expiry">Expires {client.shareExpiresAt.toLocaleDateString("en-GB")}</span>
                 <form className="share-renew-form" action={regenerateShareWithId}>
                   <ShareExpirySelect />
-                  <button className="button button-secondary" type="submit">Regenerate</button>
+                  <SubmitButton className="button button-secondary" confirmMessage="Replace the current client link? The existing link will stop working." pendingLabel="Regenerating...">Regenerate</SubmitButton>
                 </form>
                 <form action={disableShareWithId}>
-                  <button className="button button-secondary" type="submit">Revoke Link</button>
+                  <SubmitButton className="button button-danger" confirmMessage="Revoke this client link? Anyone using it will immediately lose access." pendingLabel="Revoking...">Revoke Link</SubmitButton>
                 </form>
               </div>
             ) : (
@@ -200,7 +201,6 @@ function ClientHeader({
   return (
     <header className="page-header client-report-header">
       <div>
-        <p className="breadcrumb"><Link href="/clients">Clients</Link> / {clientName}</p>
         <h2>{clientName}</h2>
         <p>{settingsOpen ? "Client and report settings" : "Local search performance report"}</p>
       </div>

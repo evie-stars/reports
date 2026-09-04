@@ -7,6 +7,7 @@ import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { workerHealth } from "@/lib/worker-health";
 import { googleSearchConsoleConfigured } from "@/lib/google-search-console";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,7 @@ export default async function SettingsPage({ searchParams }: {
       <header className="page-header">
         <div>
           <h2>Settings</h2>
-          <p>Integration status and safety limits for the first build phase.</p>
+          <p>Connections, access controls and reporting safeguards.</p>
         </div>
       </header>
 
@@ -119,7 +120,7 @@ export default async function SettingsPage({ searchParams }: {
                       <small>{connection._count.projects} mapped report{connection._count.projects === 1 ? "" : "s"} · connected {connection.connectedAt.toLocaleDateString("en-GB")}</small>
                     </div>
                     <form action={disconnect}>
-                      <button className="button button-secondary" type="submit">Disconnect</button>
+                      <SubmitButton className="button button-danger" confirmMessage={`Disconnect ${connection.accountEmail}? Reports mapped to this account will stop refreshing.`} pendingLabel="Disconnecting...">Disconnect</SubmitButton>
                     </form>
                   </div>
                 );
@@ -189,11 +190,11 @@ export default async function SettingsPage({ searchParams }: {
           </table>
         </div>
 
-        <div className="card">
-          <p className="label label-with-icon"><Icon name="graph" />Next Integrations</p>
+        <div className="card roadmap-card">
+          <p className="label label-with-icon"><Icon name="graph" />Planned Integration</p>
           <h3>Google Analytics 4</h3>
           <p className="muted">
-            The database includes a GA4 snapshot table. We can add its connection and import flow after Search Console reporting is established.
+            Add website engagement and conversion data alongside rankings and Search Console performance.
           </p>
         </div>
       </section>

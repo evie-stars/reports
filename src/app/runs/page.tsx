@@ -4,6 +4,7 @@ import { Icon } from "@/components/icon";
 import Link from "next/link";
 import { retryFailedRankRun } from "@/app/actions";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -34,12 +35,14 @@ export default async function RunsPage() {
         <Summary label="Available" value={`$${budget.availableUsd.toFixed(4)}`} />
       </section>
 
-      <section className="card spaced-section">
+      <section className={`card spaced-section${schedules.length === 0 ? " compact-empty-section" : ""}`}>
         <div className="section-heading compact-heading">
           <div><p className="label label-with-icon"><Icon name="settings" />Monthly Schedules</p><h3>Upcoming automated reports</h3></div>
           <span className="muted">{schedules.length} enabled</span>
         </div>
-        <div className="table-scroll">
+        {schedules.length === 0 ? (
+          <p className="compact-empty-copy">No monthly schedules are enabled. Configure a report to add it here.</p>
+        ) : <div className="table-scroll">
           <table className="table queue-table">
             <thead><tr><th>Client / Report</th><th>Next run</th><th>Keywords</th><th>Areas</th><th>Method</th></tr></thead>
             <tbody>
@@ -52,15 +55,14 @@ export default async function RunsPage() {
                   <td><span className="status good">Standard</span></td>
                 </tr>
               ))}
-              {schedules.length === 0 ? <tr><td className="empty-table" colSpan={5}>No monthly schedules are enabled.</td></tr> : null}
             </tbody>
           </table>
-        </div>
+        </div>}
       </section>
 
       <section className="card spaced-section">
         <div className="section-heading compact-heading"><div><p className="label label-with-icon"><Icon name="graph" />Queue Operations</p><h3>Report history and progress</h3></div></div>
-        <div className="table-scroll"><table className="table queue-table">
+        <div className="table-scroll"><table className="table queue-table queue-history-table">
           <thead>
             <tr>
               <th>Date</th>
@@ -81,7 +83,7 @@ export default async function RunsPage() {
                 <td>
                   <span className={`status ${statusTone(run.status)}`}>{run.status}</span>
                   {run.nextPollAt ? <small className="row-context">Next check {run.nextPollAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</small> : null}
-                  {run.lastError ? <small className="queue-error">{run.lastError}</small> : null}
+                  {run.lastError ? <small className="queue-error" title={run.lastError}>{readableRunError(run.lastError)}</small> : null}
                 </td>
                 <td>{readableMethod(run.deliveryMethod)}</td>
                 <td>
@@ -92,7 +94,7 @@ export default async function RunsPage() {
                 <td>{run.requestedByEmail ?? "System"}</td>
                 <td className="table-action-cell">
                   {actor.role === "admin" && (run.status === "failed" || run.status === "blocked") && run.selection ? (
-                    <form action={retryFailedRankRun.bind(null, run.id)}><button className="button button-secondary" type="submit">Retry</button></form>
+                    <form action={retryFailedRankRun.bind(null, run.id)}><SubmitButton className="button button-secondary" confirmMessage={`Retry this report run? Its estimated API cost is $${run.estimatedCostUsd.toString()}.`} pendingLabel="Queuing...">Retry</SubmitButton></form>
                   ) : null}
                 </td>
               </tr>
@@ -159,4 +161,10 @@ function readableMethod(method: string) {
   if (method === "standard") return "Standard queue";
   if (method === "live") return "Live check";
   return method.charAt(0).toUpperCase() + method.slice(1);
+}
+
+function readableRunError(error: string) {
+  if (error.includes("DATAFORSEO_LOGIN") || error.includes("DATAFORSEO_PASSWORD")) return "DataForSEO credentials were unavailable to the worker.";
+  if (error.includes("DATAFORSEO_LIVE_ENABLED")) return "Paid API requests were disabled when this run started.";
+  return error;
 }

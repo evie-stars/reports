@@ -16,6 +16,8 @@ import { Icon } from "@/components/icon";
 import { LiveRunForm } from "@/components/live-run-form";
 import { GscImportButton } from "@/components/gsc-import-button";
 import { SandboxRunForm } from "@/components/sandbox-run-form";
+import { SubmitButton } from "@/components/submit-button";
+import { PropertyPicker } from "@/components/property-picker";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
 import { configuredKeywordMetricsCostUsd, estimateRankRunCost } from "@/lib/dataforseo-costs";
@@ -99,9 +101,6 @@ export default async function ProjectDetailPage({
     <>
       <header className="page-header">
         <div>
-          <p className="breadcrumb">
-            <Link href="/clients">Clients</Link> / <Link href={`/clients/${project.client.id}`}>{project.client.name}</Link> / {project.name}
-          </p>
           <h2>{project.name}</h2>
           <p>Tracking settings for {project.domain}{project.serviceArea ? ` - ${project.serviceArea}` : ""}</p>
         </div>
@@ -117,7 +116,16 @@ export default async function ProjectDetailPage({
       {gscImported !== undefined ? <div className="notice"><strong>Search Console data imported.</strong> {gscImported} daily snapshot{gscImported === "1" ? "" : "s"} stored.</div> : null}
       {gscImportError ? <div className="notice danger-notice"><strong>Search Console import failed.</strong> {gscImportError}</div> : null}
 
-      <section className="grid two">
+      <nav className="settings-subnav" aria-label="Report settings sections">
+        <a href="#general">General</a>
+        <a href="#search-console">Search Console</a>
+        <a href="#schedule">Schedule</a>
+        <a href="#tracking-lists">Keywords & Areas</a>
+        <a href="#testing">Testing</a>
+        <a href="#activity">Activity</a>
+      </nav>
+
+      <section className="grid two" id="general">
         <form className="card form" action={updateProjectWithId}>
           <p className="label label-with-icon"><Icon name="home" />Project Details</p>
           <input type="hidden" name="clientId" value={project.clientId} />
@@ -137,7 +145,7 @@ export default async function ProjectDetailPage({
             Service area
             <input name="serviceArea" defaultValue={project.serviceArea ?? ""} />
           </label>
-          <button className="button" type="submit">Save Project</button>
+          <SubmitButton pendingLabel="Saving project...">Save Project</SubmitButton>
         </form>
 
         <div className="card">
@@ -150,7 +158,7 @@ export default async function ProjectDetailPage({
         </div>
       </section>
 
-      <section className="card spaced-section gsc-project-card">
+      <section className="card spaced-section gsc-project-card" id="search-console">
         <div className="section-heading compact-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Google Search Console</p>
@@ -169,7 +177,7 @@ export default async function ProjectDetailPage({
                 <small>{readableGscPermission(project.gscPermissionLevel)} · mapped {project.gscConnectedAt?.toLocaleDateString("en-GB") ?? "recently"}</small>
               </div>
               <form action={unmapGscProperty}>
-                <button className="button button-secondary" type="submit">Remove Mapping</button>
+                <SubmitButton className="button button-danger" confirmMessage="Remove this Search Console mapping? Existing imported data will remain, but future imports will stop." pendingLabel="Removing...">Remove Mapping</SubmitButton>
               </form>
             </div>
             <div className="gsc-import-control">
@@ -196,24 +204,20 @@ export default async function ProjectDetailPage({
           <p className="danger-text">{gscProperties.error ?? "The connected account has no available Search Console properties."}</p>
         ) : (
           <form className="gsc-property-form" action={mapGscProperty}>
-            <label>
-              Search Console property
-              <select name="gscProperty" required defaultValue={gscDefaultValue(project, gscProperties.options)}>
-                <option value="" disabled>Select a property</option>
-                {gscProperties.options.map((option) => (
-                  <option key={`${option.connectionId}:${option.site.siteUrl}`} value={gscOptionValue(option)}>
-                    {displayGscProperty(option.site.siteUrl)} · {option.accountEmail}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="button" type="submit">Save Property</button>
+            <PropertyPicker
+              defaultValue={gscDefaultValue(project, gscProperties.options)}
+              options={gscProperties.options.map((option) => ({
+                label: `${displayGscProperty(option.site.siteUrl)} · ${option.accountEmail}`,
+                value: gscOptionValue(option)
+              }))}
+            />
+            <SubmitButton pendingLabel="Saving property...">Save Property</SubmitButton>
           </form>
         )}
         {gscProperties.error && gscProperties.options.length > 0 ? <p className="danger-text gsc-property-error">{gscProperties.error}</p> : null}
       </section>
 
-      <form className="card form schedule-card spaced-section" action={updateScheduleWithId}>
+      <form className="card form schedule-card spaced-section" action={updateScheduleWithId} id="schedule">
         <div className="section-heading compact-heading">
           <div>
             <p className="label label-with-icon"><Icon name="settings" />Monthly Schedule</p>
@@ -256,11 +260,11 @@ export default async function ProjectDetailPage({
           <p className="muted form-note">
             Current selection: {activeKeywords.length * activeLocations.length * project.scheduleDevices.length * Math.max(1, scheduledSearchTypes.length)} Standard task(s). Maximum estimate: ${scheduleEstimate.toFixed(4)} per report.
           </p>
-          <button className="button" type="submit">Save Schedule</button>
+          <SubmitButton pendingLabel="Saving schedule...">Save Schedule</SubmitButton>
         </div>
       </form>
 
-      <section className="card spaced-section keyword-metrics-card">
+      <section className="card spaced-section keyword-metrics-card" id="tracking">
         <div>
           <p className="label label-with-icon"><Icon name="graph" />Keyword Demand</p>
           <h3>Search volume and 12-month trends</h3>
@@ -285,26 +289,29 @@ export default async function ProjectDetailPage({
         {project.keywordMetricsError ? <p className="danger-text metrics-error">{project.keywordMetricsError}</p> : null}
       </section>
 
-      <section style={{ marginTop: 18 }}>
-        <SandboxRunForm
-          projectId={project.id}
-          keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
-          locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
-          credentialsConfigured={credentialsConfigured}
-        />
-      </section>
+      <details className="configuration-disclosure spaced-section" id="testing">
+        <summary>
+          <span><strong>Testing tools</strong><small>Run controlled sandbox and single-keyword verification checks</small></span>
+          <span className="disclosure-action">Show tools</span>
+        </summary>
+        <div className="configuration-disclosure-content">
+          <SandboxRunForm
+            projectId={project.id}
+            keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
+            locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
+            credentialsConfigured={credentialsConfigured}
+          />
+          <LiveRunForm
+            projectId={project.id}
+            keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
+            locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
+            credentialsConfigured={credentialsConfigured}
+            liveEnabled={liveEnabled}
+          />
+        </div>
+      </details>
 
-      <section style={{ marginTop: 18 }}>
-        <LiveRunForm
-          projectId={project.id}
-          keywords={activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }))}
-          locations={activeLocations.map((location) => ({ id: location.id, label: location.name }))}
-          credentialsConfigured={credentialsConfigured}
-          liveEnabled={liveEnabled}
-        />
-      </section>
-
-      <section className="grid two" style={{ marginTop: 18 }}>
+      <section className="grid two" id="tracking-lists" style={{ marginTop: 18 }}>
         <form className="card form" action={createKeywords}>
           <p className="label label-with-icon"><Icon name="tags" />Add Keywords</p>
           <input type="hidden" name="projectId" value={project.id} />
@@ -336,7 +343,7 @@ export default async function ProjectDetailPage({
         <LocationTable projectId={project.id} locations={project.locations} />
       </section>
 
-      <section className="card" style={{ marginTop: 18 }}>
+      <section className="card" id="activity" style={{ marginTop: 18 }}>
         <p className="label label-with-icon"><Icon name="graph" />Recent Runs</p>
         <table className="table">
           <thead>

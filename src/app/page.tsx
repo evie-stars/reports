@@ -19,7 +19,7 @@ export default async function DashboardPage() {
       <header className="page-header">
         <div>
           <h2>Dashboard</h2>
-          <p>A quick view of reporting activity across all clients.</p>
+          <p>Reporting activity, system health and recent work.</p>
         </div>
       </header>
 
@@ -93,7 +93,7 @@ export default async function DashboardPage() {
               {data.runs.map((run) => (
                 <tr key={run.id}>
                   <td><Link href={`/runs/${run.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
-                  <td><span className="status">{run.status}</span></td>
+                  <td><span className={`status ${dashboardStatusTone(run.status)}`}>{run.status}</span></td>
                   <td>{run.sandbox ? "Sandbox" : "Live"}</td>
                   <td>${run.actualCostUsd.toString()}</td>
                 </tr>
@@ -176,4 +176,10 @@ function ConfigurationItem({
       <span><strong>{label}</strong><small>{value}</small></span>
     </div>
   );
+}
+
+function dashboardStatusTone(status: string) {
+  if (status === "completed") return "good";
+  if (status === "failed" || status === "blocked") return "danger";
+  return "warn";
 }

@@ -4,6 +4,7 @@ import { ClientTable } from "@/components/client-table";
 import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
 import { currentActor } from "@/lib/access";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function ClientsPage({
               <input name="notes" placeholder="Optional internal notes" />
             </label>
           </div>
-          <button className="button" type="submit">Create Client</button>
+          <SubmitButton pendingLabel="Creating client...">Create Client</SubmitButton>
         </form>
       ) : null}
 
@@ -82,7 +83,7 @@ export default async function ClientsPage({
               <input name="projectName" placeholder="Organic Rankings" />
             </label>
           </div>
-          <button className="button" type="submit">Import Client History</button>
+          <SubmitButton pendingLabel="Importing history...">Import Client History</SubmitButton>
         </form>
       ) : null}
 
