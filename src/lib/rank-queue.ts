@@ -37,8 +37,9 @@ export async function enqueueProjectRerun(input: {
     }
   });
   if (!project) throw new Error("Report not found.");
+  if (!project.reportModules.includes("rankings")) throw new Error("SEO Rankings are not enabled for this report.");
 
-  if (input.role === "sales") await assertSalesCooldown(project.id);
+  if (input.role === "team") await assertTeamCooldown(project.id);
 
   const existing = await prisma.rankRun.findFirst({
     where: { projectId: project.id, status: { in: ["queued", "running"] }, source: { in: ["manual", "scheduled"] } }
@@ -249,8 +250,8 @@ export async function processRankQueue(maxJobs = configuredMaxJobs()) {
   }
 }
 
-async function assertSalesCooldown(projectId: string) {
-  const days = positiveInteger(process.env.RANK_SALES_COOLDOWN_DAYS, 7);
+async function assertTeamCooldown(projectId: string) {
+  const days = positiveInteger(process.env.RANK_TEAM_COOLDOWN_DAYS ?? process.env.RANK_SALES_COOLDOWN_DAYS, 7);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const recent = await prisma.rankRun.findFirst({
     where: {
@@ -262,7 +263,7 @@ async function assertSalesCooldown(projectId: string) {
     },
     orderBy: { completedAt: "desc" }
   });
-  if (recent) throw new Error(`Sales users can re-run this report ${days} days after its latest completed report.`);
+  if (recent) throw new Error(`Team users can re-run this report ${days} days after its latest completed report.`);
 }
 
 async function acquireWorkerLock(owner: string) {

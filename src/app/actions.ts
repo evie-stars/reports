@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { currentActor, requireAdmin, type CurrentActor } from "@/lib/access";
+import { currentActor, requireAdmin, requireManager, type CurrentActor } from "@/lib/access";
 import { writeRequestAudit } from "@/lib/audit";
 import { DataForSeoClient } from "@/lib/dataforseo";
 import { prisma } from "@/lib/db";
@@ -89,14 +89,47 @@ const gscPropertySelectionSchema = z.object({
   siteUrl: z.string().min(1)
 });
 
+const reportModulesSchema = z.object({
+  reportModules: z.array(z.enum(["rankings", "gsc", "ga4"])).min(1, "Select at least one report section.")
+});
+
+const reportRequestSchema = z.object({
+  clientName: z.string().trim().min(1, "Client or prospect name is required.").max(120),
+  websiteUrl: optionalText,
+  notes: z.string().trim().min(1, "Tell us what the report is needed for.").max(1000)
+});
+
 export async function createClient(formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   const client = await prisma.client.create({ data });
   await auditAction("client.created", actor, "client", client.id);
 
   revalidatePath("/clients");
   redirect(`/clients/${client.id}?view=settings`);
+}
+
+export async function requestReport(formData: FormData) {
+  const actor = await guardedActorAction("report-request", actionRateLimit());
+  const data = reportRequestSchema.parse(readForm(formData, ["clientName", "websiteUrl", "notes"]));
+  const request = await prisma.reportRequest.create({
+    data: {
+      ...data,
+      requestedByEmail: actor.email,
+      requestedByName: actor.name
+    }
+  });
+  await auditAction("report.requested", actor, "reportRequest", request.id, { clientName: data.clientName });
+  revalidatePath("/");
+  revalidatePath("/clients");
+  redirect("/clients?requestSent=1");
+}
+
+export async function reviewReportRequest(requestId: string) {
+  const actor = await guardedAdminAction("report-request", actionRateLimit());
+  await prisma.reportRequest.update({ where: { id: requestId }, data: { status: "reviewed" } });
+  await auditAction("report.request_reviewed", actor, "reportRequest", requestId);
+  revalidatePath("/");
 }
 
 export async function importRankHistory(formData: FormData) {
@@ -131,7 +164,7 @@ export async function importRankHistory(formData: FormData) {
 }
 
 export async function updateClient(clientId: string, formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = clientSchema.parse(readForm(formData, ["name", "notes"]));
   await prisma.client.update({ where: { id: clientId }, data });
   await auditAction("client.updated", actor, "client", clientId);
@@ -189,7 +222,7 @@ export async function regenerateClientShare(clientId: string, formData: FormData
 }
 
 export async function createProject(formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   const project = await prisma.project.create({ data });
   await auditAction("project.created", actor, "project", project.id, { clientId: data.clientId });
@@ -200,7 +233,7 @@ export async function createProject(formData: FormData) {
 }
 
 export async function updateProject(projectId: string, formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = projectSchema.parse(readForm(formData, ["clientId", "name", "domain", "targetBusinessName", "serviceArea"]));
   await prisma.project.update({ where: { id: projectId }, data });
   await auditAction("project.updated", actor, "project", projectId, { clientId: data.clientId });
@@ -209,8 +242,24 @@ export async function updateProject(projectId: string, formData: FormData) {
   revalidatePath(`/projects/${projectId}`);
 }
 
+export async function updateProjectModules(projectId: string, formData: FormData) {
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
+  const data = reportModulesSchema.parse({ reportModules: stringListFromForm(formData, "reportModules") });
+  const project = await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      reportModules: data.reportModules,
+      ...(data.reportModules.includes("rankings") ? {} : { scheduleEnabled: false })
+    },
+    select: { clientId: true }
+  });
+  await auditAction("project.modules_updated", actor, "project", projectId, { modules: data.reportModules });
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/clients/${project.clientId}`);
+}
+
 export async function updateProjectGscProperty(projectId: string, formData: FormData) {
-  const actor = await guardedAdminAction("integration", actionRateLimit());
+  const actor = await guardedManagerAction("integration", actionRateLimit());
 
   try {
     const selection = readGscPropertySelection(formData.get("gscProperty"));
@@ -269,7 +318,7 @@ export async function updateProjectGscProperty(projectId: string, formData: Form
 }
 
 export async function disconnectProjectGscProperty(projectId: string) {
-  const actor = await guardedAdminAction("integration", actionRateLimit());
+  const actor = await guardedManagerAction("integration", actionRateLimit());
   await prisma.project.update({
     where: { id: projectId },
     data: {
@@ -314,7 +363,7 @@ export async function disconnectGoogleSearchConsole(connectionId: string) {
 }
 
 export async function importProjectGscData(projectId: string) {
-  const actor = await guardedAdminAction("gsc-import", gscImportRateLimit());
+  const actor = await guardedManagerAction("gsc-import", gscImportRateLimit());
   let imported: Awaited<ReturnType<typeof importProjectSearchConsoleData>>;
 
   try {
@@ -337,8 +386,15 @@ export async function importProjectGscData(projectId: string) {
 }
 
 export async function createKeyword(formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = keywordSchema.parse(readForm(formData, ["projectId", "phrase", "group", "targetUrl"]));
+  const existingKeywords = await prisma.keyword.findMany({
+    where: { projectId: data.projectId },
+    select: { phrase: true }
+  });
+  if (existingKeywords.some((keyword) => normalizedKeyword(keyword.phrase) === normalizedKeyword(data.phrase))) {
+    throw new Error("That keyword is already included in this report.");
+  }
   const keyword = await prisma.keyword.create({ data });
   await auditAction("keyword.created", actor, "keyword", keyword.id, { projectId: data.projectId });
 
@@ -346,32 +402,42 @@ export async function createKeyword(formData: FormData) {
 }
 
 export async function createKeywords(formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = bulkKeywordSchema.parse(readForm(formData, ["projectId", "phrases", "group", "targetUrl"]));
   const phrases = uniqueLines(data.phrases);
-
-  await prisma.keyword.createMany({
-    data: phrases.map((phrase) => ({
-      projectId: data.projectId,
-      phrase,
-      group: data.group,
-      targetUrl: data.targetUrl
-    }))
+  const existingKeywords = await prisma.keyword.findMany({
+    where: { projectId: data.projectId },
+    select: { phrase: true }
   });
-  await auditAction("keyword.bulk_created", actor, "project", data.projectId, { count: phrases.length });
+  const existingPhrases = new Set(existingKeywords.map((keyword) => normalizedKeyword(keyword.phrase)));
+  const newPhrases = phrases.filter((phrase) => !existingPhrases.has(normalizedKeyword(phrase)));
+  const skipped = phrases.length - newPhrases.length;
+
+  if (newPhrases.length > 0) {
+    await prisma.keyword.createMany({
+      data: newPhrases.map((phrase) => ({
+        projectId: data.projectId,
+        phrase,
+        group: data.group,
+        targetUrl: data.targetUrl
+      }))
+    });
+  }
+  await auditAction("keyword.bulk_created", actor, "project", data.projectId, { count: newPhrases.length, duplicatesSkipped: skipped });
 
   revalidatePath(`/projects/${data.projectId}`);
+  redirect(`/projects/${data.projectId}?keywordsAdded=${newPhrases.length}&duplicatesSkipped=${skipped}`);
 }
 
 export async function updateKeywordActive(keywordId: string, projectId: string, active: boolean) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   await prisma.keyword.update({ where: { id: keywordId }, data: { active } });
   await auditAction("keyword.status_changed", actor, "keyword", keywordId, { projectId, active });
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function createLocation(formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = locationSchema.parse(readForm(formData, ["projectId", "countryCode", "dataForSeoLocationName"]));
   const supportedAreas = await new DataForSeoClient().getGoogleLocations(data.countryCode);
   const area = supportedAreas.find((location) => location.locationName === data.dataForSeoLocationName);
@@ -409,7 +475,7 @@ export async function createLocation(formData: FormData) {
 }
 
 export async function updateLocationActive(locationId: string, projectId: string, active: boolean) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   await prisma.location.update({ where: { id: locationId }, data: { active } });
   await auditAction("location.status_changed", actor, "location", locationId, { projectId, active });
   revalidatePath(`/projects/${projectId}`);
@@ -478,7 +544,7 @@ export async function runLiveCheck(projectId: string, formData: FormData) {
 }
 
 export async function updateProjectSchedule(projectId: string, formData: FormData) {
-  const actor = await guardedAdminAction("mutation", actionRateLimit());
+  const actor = await guardedManagerAction("mutation", actionRateLimit());
   const data = scheduleSchema.parse({
     scheduleEnabled: formData.get("scheduleEnabled") === "on",
     scheduleDay: stringFromForm(formData.get("scheduleDay")),
@@ -486,6 +552,10 @@ export async function updateProjectSchedule(projectId: string, formData: FormDat
     scheduleSearchTypes: stringListFromForm(formData, "scheduleSearchTypes"),
     schedulePageLimit: stringFromForm(formData.get("schedulePageLimit"))
   });
+  if (data.scheduleEnabled) {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { reportModules: true } });
+    if (!project?.reportModules.includes("rankings")) throw new Error("Enable SEO Rankings before scheduling this report.");
+  }
   await prisma.project.update({ where: { id: projectId }, data });
   await auditAction("project.schedule_updated", actor, "project", projectId, {
     enabled: data.scheduleEnabled,
@@ -507,7 +577,8 @@ export async function queueProjectRerun(clientId: string, formData: FormData) {
     const message = error instanceof Error ? error.message : "Unable to queue the report.";
     const actor = await currentActor();
     await auditAction("report.rerun_queued", actor, "client", clientId, { error: message }, "failure");
-    redirect(`/clients/${clientId}?queueError=${encodeURIComponent(message)}`);
+    const displayedMessage = actor.role === "team" ? teamQueueError(message) : message;
+    redirect(`/clients/${clientId}?queueError=${encodeURIComponent(displayedMessage)}`);
   }
 
   revalidatePath("/runs");
@@ -554,14 +625,17 @@ function uniqueValues<T>(values: T[]) {
 }
 
 function uniqueLines(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    )
-  );
+  const unique = new Map<string, string>();
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => unique.set(normalizedKeyword(line), line));
+  return Array.from(unique.values());
+}
+
+function normalizedKeyword(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-GB");
 }
 
 function readGscPropertySelection(value: FormDataEntryValue | null) {
@@ -575,6 +649,12 @@ function readGscPropertySelection(value: FormDataEntryValue | null) {
 
 async function guardedAdminAction(scope: string, policy: RateLimitPolicy) {
   const actor = await requireAdmin();
+  await enforceRateLimit(scope, actor.email, policy);
+  return actor;
+}
+
+async function guardedManagerAction(scope: string, policy: RateLimitPolicy) {
+  const actor = await requireManager();
   await enforceRateLimit(scope, actor.email, policy);
   return actor;
 }
@@ -608,4 +688,11 @@ function shareExpiry(formData?: FormData) {
   const parsed = Number.parseInt(stringFromForm(formData?.get("shareExpiryDays") ?? null), 10);
   const days = [7, 30, 90, 365].includes(parsed) ? parsed : 30;
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
+function teamQueueError(message: string) {
+  if (message.includes("days after its latest completed report")) return message;
+  if (message === "This report is already queued or running.") return message;
+  if (message === "Report not found." || message === "SEO Rankings are not enabled for this report.") return message;
+  return "This report could not be queued. A manager can review the reporting limits and configuration.";
 }

@@ -1,5 +1,6 @@
 import Image, { type StaticImageData } from "next/image";
 import contacts from "../../public/icons/contacts.svg";
+import calendar from "../../public/icons/calendar.svg";
 import edit from "../../public/icons/edit.svg";
 import graph from "../../public/icons/graph.svg";
 import home from "../../public/icons/home.svg";
@@ -8,9 +9,10 @@ import search from "../../public/icons/search.svg";
 import settings from "../../public/icons/settings.svg";
 import tags from "../../public/icons/tags.svg";
 
-export type IconName = "contacts" | "edit" | "graph" | "home" | "location" | "search" | "settings" | "tags";
+export type IconName = "calendar" | "contacts" | "edit" | "graph" | "home" | "location" | "search" | "settings" | "tags";
 
 const icons: Record<IconName, StaticImageData> = {
+  calendar,
   contacts,
   edit,
   graph,

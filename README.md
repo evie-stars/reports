@@ -8,7 +8,7 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 - Store immutable rank-run snapshots for organic, Google Maps, and SERP feature data.
 - Default to DataForSEO Sandbox so setup and parser work does not spend trial credit.
 - Queue guarded live checks, ad hoc reports, and monthly schedules.
-- Restrict the reporting workspace with approved Google accounts and admin/sales roles.
+- Restrict the reporting workspace with approved Google accounts and admin, manager, and team roles.
 - Provide the foundation for later GA4 and Google Search Console imports.
 
 ## Sandbox Rank Checks
@@ -32,7 +32,9 @@ Organic checks can be capped between one and ten result pages, while Google Maps
 
 `DATAFORSEO_MONTHLY_BUDGET_USD` is a hard application-level monthly ceiling. The queue reserves the maximum estimated cost before accepting a run, then stores the exact DataForSEO-reported charge. Polling requests are excluded from spend totals so task cost is not counted twice. The Rank Runs screen shows current spend, reservations, available budget, task progress, failures, retries, and upcoming schedules.
 
-The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks. Sales users cannot queue another full report within `RANK_SALES_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; administrators can override that cooldown.
+The worker uses a database lock so only one worker processes reports at a time, and `RANK_QUEUE_DELAY_MS` paces individual API tasks. Team users cannot queue another full report within `RANK_TEAM_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; managers and administrators can override that cooldown.
+
+The Scheduled workspace lists every enabled monthly report, its next run date, keyword and area coverage, search depth, devices, result types, and enabled report data. Report content can currently include SEO Rankings and mapped Search Console data. GA4 appears as a planned module until that integration is connected.
 
 ## Keyword Demand
 
@@ -48,7 +50,11 @@ Authentication is off until `AUTH_ENABLED=true`. Create a Google OAuth web clien
 https://reports.starwebsites.co.uk/api/auth/callback/google
 ```
 
-Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access; other approved accounts receive the sales role. A verified Google email must still match the allowlist. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
+Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and at least one of `AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`. Emails in `AUTH_ADMIN_EMAILS` receive administrator access, emails in `AUTH_MANAGER_EMAILS` receive manager access, and all other approved accounts receive the team role. A verified Google email must still match the allowlist. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
+
+- **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
+- **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console property mapping.
+- **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
 
 ## Security Controls
 

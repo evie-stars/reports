@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "@/components/icon";
+import type { AppRole } from "../../auth";
 
 export function AppShell({
   children,
@@ -13,11 +14,12 @@ export function AppShell({
 }: {
   children: React.ReactNode;
   accountControl?: React.ReactNode;
-  appRole?: "admin" | "sales";
+  appRole?: AppRole;
 }) {
   const pathname = usePathname();
   const breadcrumbs = getBreadcrumbs(pathname);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const homeHref = appRole === "admin" || !appRole ? "/" : "/clients";
 
   if (pathname.startsWith("/share/") || pathname === "/login") {
     return <main className="shared-main">{children}</main>;
@@ -27,7 +29,7 @@ export function AppShell({
     <div className="app-shell">
       <aside className={`sidebar${navigationOpen ? " navigation-open" : ""}`}>
         <div className="brand-block">
-          <Link className="brand-link" href="/" aria-label="Report Hub dashboard">
+          <Link className="brand-link" href={homeHref} aria-label={appRole === "admin" || !appRole ? "Report Hub dashboard" : "Report Hub clients"}>
             <Image
               className="brand-logo"
               src="/star-websites.png"
@@ -50,10 +52,11 @@ export function AppShell({
           </button>
         </div>
         <nav id="primary-navigation" aria-label="Primary navigation">
-          <NavigationLink href="/" pathname={pathname} icon="home" onNavigate={() => setNavigationOpen(false)}>Dashboard</NavigationLink>
+          {appRole === "admin" || !appRole ? <NavigationLink href="/" pathname={pathname} icon="home" onNavigate={() => setNavigationOpen(false)}>Dashboard</NavigationLink> : null}
           <NavigationLink href="/clients" pathname={pathname} icon="contacts" onNavigate={() => setNavigationOpen(false)}>Clients</NavigationLink>
           <NavigationLink href="/runs" pathname={pathname} icon="graph" onNavigate={() => setNavigationOpen(false)}>Rank Runs</NavigationLink>
-          {appRole !== "sales" ? <NavigationLink href="/settings" pathname={pathname} icon="settings" onNavigate={() => setNavigationOpen(false)}>Settings</NavigationLink> : null}
+          <NavigationLink href="/scheduled" pathname={pathname} icon="calendar" onNavigate={() => setNavigationOpen(false)}>Scheduled</NavigationLink>
+          {appRole === "admin" || !appRole ? <NavigationLink href="/settings" pathname={pathname} icon="settings" onNavigate={() => setNavigationOpen(false)}>Settings</NavigationLink> : null}
         </nav>
       </aside>
       <main>
@@ -84,6 +87,7 @@ function getBreadcrumbs(pathname: string) {
   if (pathname.startsWith("/projects/")) return [{ label: "Clients", href: "/clients" }, { label: "Edit report" }];
   if (pathname === "/runs") return [{ label: "Rank Runs" }];
   if (pathname.startsWith("/runs/")) return [{ label: "Rank Runs", href: "/runs" }, { label: "Run details" }];
+  if (pathname === "/scheduled") return [{ label: "Scheduled" }];
   if (pathname === "/settings") return [{ label: "Settings" }];
   return [{ label: "Report Hub" }];
 }
@@ -97,7 +101,7 @@ function NavigationLink({
 }: {
   children: React.ReactNode;
   href: string;
-  icon: "home" | "contacts" | "graph" | "settings";
+  icon: "home" | "contacts" | "graph" | "calendar" | "settings";
   onNavigate: () => void;
   pathname: string;
 }) {

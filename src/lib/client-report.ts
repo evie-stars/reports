@@ -1,4 +1,4 @@
-import { Device, Prisma, SearchType } from "@prisma/client";
+import { Device, Prisma, ReportModule, SearchType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export type ReportSearchParams = {
@@ -42,11 +42,14 @@ export async function getClientReportData(clientId: string, searchParams: Report
 
   if (!client) return null;
 
+  const selectedProjects = client.projects.filter((project) => !filters.projectId || project.id === filters.projectId);
+  const enabledModules = new Set(selectedProjects.flatMap((project) => project.reportModules));
+
   const where: Prisma.RankResultWhereInput = {
     run: {
       sandbox: false,
       status: "completed",
-      project: { clientId },
+      project: { clientId, reportModules: { has: ReportModule.rankings } },
       ...(filters.projectId ? { projectId: filters.projectId } : {})
     },
     keyword: {
@@ -80,6 +83,7 @@ export async function getClientReportData(clientId: string, searchParams: Report
         project: {
           clientId,
           gscPropertyUrl: { not: null },
+          reportModules: { has: ReportModule.gsc },
           ...(filters.projectId ? { id: filters.projectId } : {})
         },
         ...(gscCutoff ? { date: { gte: gscCutoff } } : {})
@@ -132,13 +136,11 @@ export async function getClientReportData(clientId: string, searchParams: Report
     new Map(client.projects.flatMap((project) => project.locations).map((location) => [location.id, location])).values()
   );
   const activeKeywordCount = client.projects
-    .filter((project) => !filters.projectId || project.id === filters.projectId)
+    .filter((project) => (!filters.projectId || project.id === filters.projectId) && project.reportModules.includes(ReportModule.rankings))
     .reduce(
       (total, project) => total + project.keywords.filter((keyword) => !filters.group || keyword.group === filters.group).length,
       0
     );
-  const selectedProjects = client.projects.filter((project) => !filters.projectId || project.id === filters.projectId);
-
   return {
     client,
     filters,
@@ -152,6 +154,11 @@ export async function getClientReportData(clientId: string, searchParams: Report
       latestDate(selectedProjects.map((project) => project.gscLastImportedAt))
     ),
     stats: buildStats(latestResults, activeKeywordCount),
+    modules: {
+      rankings: enabledModules.has(ReportModule.rankings),
+      gsc: enabledModules.has(ReportModule.gsc),
+      ga4: enabledModules.has(ReportModule.ga4)
+    },
     options: {
       projects: client.projects.map((project) => ({ id: project.id, name: project.name })),
       areas: areas.map((area) => ({ id: area.id, name: area.name })),
@@ -290,7 +297,8 @@ function buildTrend(resultsDescending: ResultShape[], period: ReportFilters["per
     twoToThree: number;
     fourToTen: number;
     elevenToTwenty: number;
-    beyondTwenty: number;
+    twentyOneToThirty: number;
+    beyondThirty: number;
     total: number;
     pageOne: number;
     topThree: number;
@@ -338,7 +346,8 @@ export function countPositionBuckets(ranks: Array<number | null>) {
     twoToThree: ranks.filter((rank) => rank !== null && rank >= 2 && rank <= 3).length,
     fourToTen: ranks.filter((rank) => rank !== null && rank >= 4 && rank <= 10).length,
     elevenToTwenty: ranks.filter((rank) => rank !== null && rank >= 11 && rank <= 20).length,
-    beyondTwenty: ranks.filter((rank) => rank === null || rank > 20).length
+    twentyOneToThirty: ranks.filter((rank) => rank !== null && rank >= 21 && rank <= 30).length,
+    beyondThirty: ranks.filter((rank) => rank === null || rank > 30).length
   };
 }
 

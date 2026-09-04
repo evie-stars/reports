@@ -14,9 +14,10 @@ import { CopyShareButton } from "@/components/copy-share-button";
 import { Icon } from "@/components/icon";
 import { SubmitButton } from "@/components/submit-button";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
-import { currentActor } from "@/lib/access";
+import { canManageReports, currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { estimateRankRunCost } from "@/lib/dataforseo-costs";
+import type { AppRole } from "../../../../auth";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
   const resolvedSearchParams = await searchParams;
   const actor = await currentActor();
   const settingsOpen = resolvedSearchParams.view === "settings";
-  if (settingsOpen && actor.role !== "admin") redirect(`/clients/${clientId}`);
+  if (settingsOpen && !canManageReports(actor.role)) redirect(`/clients/${clientId}`);
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     include: {
@@ -81,7 +82,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
             </form>
           </div>
 
-          <section className="card spaced-section share-settings">
+          {actor.role === "admin" ? <section className="card spaced-section share-settings">
             <div>
               <p className="label label-with-icon"><Icon name="tags" />Client Access</p>
               <h3>Read-only report link</h3>
@@ -105,7 +106,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
                 <button className="button" type="submit">Create Read-only Link</button>
               </form>
             )}
-          </section>
+          </section> : null}
 
           <section className="card spaced-section">
             <p className="label label-with-icon"><Icon name="settings" />Report Settings</p>
@@ -144,7 +145,7 @@ export default async function ClientDetailPage({ params, searchParams }: {
       <ClientHeader
         clientId={client.id}
         clientName={client.name}
-        projects={client.projects.map((project) => ({
+        projects={client.projects.filter((project) => project.reportModules.includes("rankings")).map((project) => ({
           id: project.id,
           name: project.name,
           estimatedCostUsd: estimateRankRunCost({
@@ -191,7 +192,7 @@ function ClientHeader({
   clientId: string;
   clientName: string;
   projects?: Array<{ id: string; name: string; estimatedCostUsd: number }>;
-  role: "admin" | "sales";
+  role: AppRole;
   settingsOpen?: boolean;
   shareEnabled?: boolean;
   shareToken?: string | null;
@@ -205,23 +206,26 @@ function ClientHeader({
         <p>{settingsOpen ? "Client and report settings" : "Local search performance report"}</p>
       </div>
       <div className="page-header-actions">
-        {!settingsOpen && shareEnabled && shareToken ? <CopyShareButton path={`/share/${shareToken}`} /> : null}
+        {!settingsOpen && role === "admin" && shareEnabled && shareToken ? <CopyShareButton path={`/share/${shareToken}`} /> : null}
         {!settingsOpen && !shareEnabled && role === "admin" ? (
           <form action={enableShare}><button className="button button-secondary" type="submit">Create Client Link</button></form>
         ) : null}
         {!settingsOpen && projects.length > 0 ? (
           <form className="rerun-form" action={queueRerun}>
             {projects.length === 1 ? (
-              <><input type="hidden" name="projectId" value={projects[0].id} /><span className="rerun-estimate">Est. ${projects[0].estimatedCostUsd.toFixed(4)}</span></>
+              <>
+                <input type="hidden" name="projectId" value={projects[0].id} />
+                {role !== "team" ? <span className="rerun-estimate">Est. ${projects[0].estimatedCostUsd.toFixed(4)}</span> : null}
+              </>
             ) : (
               <select name="projectId" aria-label="Report to re-run" required>
-                {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · est. ${project.estimatedCostUsd.toFixed(4)}</option>)}
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{role !== "team" ? ` · est. $${project.estimatedCostUsd.toFixed(4)}` : ""}</option>)}
               </select>
             )}
             <button className="button" type="submit">Queue Re-run</button>
           </form>
         ) : null}
-        {role === "admin" ? (
+        {canManageReports(role) ? (
           <Link
             className={settingsOpen ? "button button-secondary" : "icon-text-button"}
             href={settingsOpen ? `/clients/${clientId}` : `/clients/${clientId}?view=settings`}

@@ -6,6 +6,7 @@ import {
   importProjectGscData,
   queueKeywordMetrics,
   updateProjectGscProperty,
+  updateProjectModules,
   updateProjectSchedule,
   updateKeywordActive,
   updateLocationActive,
@@ -19,7 +20,7 @@ import { SandboxRunForm } from "@/components/sandbox-run-form";
 import { SubmitButton } from "@/components/submit-button";
 import { PropertyPicker } from "@/components/property-picker";
 import { prisma } from "@/lib/db";
-import { currentActor } from "@/lib/access";
+import { canManageReports, currentActor } from "@/lib/access";
 import { configuredKeywordMetricsCostUsd, estimateRankRunCost } from "@/lib/dataforseo-costs";
 import {
   googleSearchConsoleConfigured,
@@ -43,6 +44,8 @@ export default async function ProjectDetailPage({
     gscMapped?: string;
     gscImported?: string;
     gscImportError?: string;
+    keywordsAdded?: string;
+    duplicatesSkipped?: string;
   }>;
 }) {
   const { projectId } = await params;
@@ -54,7 +57,9 @@ export default async function ProjectDetailPage({
     gscError,
     gscMapped,
     gscImported,
-    gscImportError
+    gscImportError,
+    keywordsAdded,
+    duplicatesSkipped
   } = await searchParams;
   const actor = await currentActor();
   const project = await prisma.project.findUnique({
@@ -68,7 +73,7 @@ export default async function ProjectDetailPage({
   });
 
   if (!project) notFound();
-  if (actor.role !== "admin") redirect(`/clients/${project.clientId}`);
+  if (!canManageReports(actor.role)) redirect(`/clients/${project.clientId}`);
 
   const gscConfigured = googleSearchConsoleConfigured();
   const gscConnections = gscConfigured ? await prisma.googleSearchConsoleConnection.findMany({
@@ -78,6 +83,7 @@ export default async function ProjectDetailPage({
   const gscProperties = await loadGscPropertyOptions(gscConnections);
 
   const updateProjectWithId = updateProject.bind(null, project.id);
+  const updateProjectModulesWithId = updateProjectModules.bind(null, project.id);
   const updateScheduleWithId = updateProjectSchedule.bind(null, project.id);
   const activeKeywords = project.keywords.filter((keyword) => keyword.active);
   const activeLocations = project.locations.filter((location) => location.active);
@@ -115,13 +121,20 @@ export default async function ProjectDetailPage({
       {gscMapped ? <div className="notice"><strong>Search Console property mapped.</strong> This report is ready for its first data import.</div> : null}
       {gscImported !== undefined ? <div className="notice"><strong>Search Console data imported.</strong> {gscImported} daily snapshot{gscImported === "1" ? "" : "s"} stored.</div> : null}
       {gscImportError ? <div className="notice danger-notice"><strong>Search Console import failed.</strong> {gscImportError}</div> : null}
+      {keywordsAdded !== undefined ? (
+        <div className="notice">
+          <strong>{keywordsAdded} keyword{keywordsAdded === "1" ? "" : "s"} added.</strong>
+          {Number(duplicatesSkipped) > 0 ? ` ${duplicatesSkipped} duplicate${duplicatesSkipped === "1" ? " was" : "s were"} skipped.` : ""}
+        </div>
+      ) : null}
 
       <nav className="settings-subnav" aria-label="Report settings sections">
         <a href="#general">General</a>
+        <a href="#report-content">Report Content</a>
         <a href="#search-console">Search Console</a>
         <a href="#schedule">Schedule</a>
         <a href="#tracking-lists">Keywords & Areas</a>
-        <a href="#testing">Testing</a>
+        {actor.role === "admin" ? <a href="#testing">Testing</a> : null}
         <a href="#activity">Activity</a>
       </nav>
 
@@ -157,6 +170,34 @@ export default async function ProjectDetailPage({
           </div>
         </div>
       </section>
+
+      <form className="card form spaced-section report-content-card" action={updateProjectModulesWithId} id="report-content">
+        <div className="section-heading compact-heading">
+          <div>
+            <p className="label label-with-icon"><Icon name="graph" />Report Content</p>
+            <h3>Data included in this report</h3>
+          </div>
+          <span className="muted">Choose at least one</span>
+        </div>
+        <div className="report-module-grid">
+          <label className="report-module-option">
+            <input name="reportModules" type="checkbox" value="rankings" defaultChecked={project.reportModules.includes("rankings")} />
+            <span><strong>SEO Rankings</strong><small>Keyword positions, movement, URLs and Maps results</small></span>
+          </label>
+          <label className="report-module-option">
+            <input name="reportModules" type="checkbox" value="gsc" defaultChecked={project.reportModules.includes("gsc")} />
+            <span><strong>Search Console</strong><small>Clicks, impressions, CTR and organic visibility</small></span>
+          </label>
+          <label className="report-module-option unavailable" aria-disabled="true">
+            <input type="checkbox" value="ga4" disabled />
+            <span><strong>Google Analytics 4</strong><small>Available when the GA4 integration is connected</small></span>
+          </label>
+        </div>
+        <div className="schedule-footer">
+          <p className="muted form-note">Turning off SEO Rankings also pauses the ranking schedule.</p>
+          <SubmitButton pendingLabel="Saving content...">Save Report Content</SubmitButton>
+        </div>
+      </form>
 
       <section className="card spaced-section gsc-project-card" id="search-console">
         <div className="section-heading compact-heading">
@@ -197,8 +238,8 @@ export default async function ProjectDetailPage({
           <p className="muted">Search Console environment variables are missing from the server.</p>
         ) : gscConnections.length === 0 ? (
           <div className="integration-empty">
-            <p className="muted">Connect a Google account before assigning this report to a property.</p>
-            <Link className="button button-secondary" href="/settings">Open Settings</Link>
+            <p className="muted">An administrator needs to connect a Google account before a property can be assigned.</p>
+            {actor.role === "admin" ? <Link className="button button-secondary" href="/settings">Open Settings</Link> : null}
           </div>
         ) : gscProperties.options.length === 0 ? (
           <p className="danger-text">{gscProperties.error ?? "The connected account has no available Search Console properties."}</p>
@@ -217,7 +258,7 @@ export default async function ProjectDetailPage({
         {gscProperties.error && gscProperties.options.length > 0 ? <p className="danger-text gsc-property-error">{gscProperties.error}</p> : null}
       </section>
 
-      <form className="card form schedule-card spaced-section" action={updateScheduleWithId} id="schedule">
+      {project.reportModules.includes("rankings") ? <form className="card form schedule-card spaced-section" action={updateScheduleWithId} id="schedule">
         <div className="section-heading compact-heading">
           <div>
             <p className="label label-with-icon"><Icon name="settings" />Monthly Schedule</p>
@@ -236,7 +277,7 @@ export default async function ProjectDetailPage({
             </select>
           </label>
           <label>
-            Organic result pages
+            Pages to search
             <select name="schedulePageLimit" defaultValue={project.schedulePageLimit}>
               {Array.from({ length: 10 }, (_, index) => index + 1).map((page) => <option key={page} value={page}>{page}</option>)}
             </select>
@@ -262,9 +303,16 @@ export default async function ProjectDetailPage({
           </p>
           <SubmitButton pendingLabel="Saving schedule...">Save Schedule</SubmitButton>
         </div>
-      </form>
+      </form> : (
+        <section className="card spaced-section compact-empty-section" id="schedule">
+          <div className="section-heading compact-heading">
+            <div><p className="label label-with-icon"><Icon name="calendar" />Monthly Schedule</p><h3>Ranking schedule paused</h3></div>
+          </div>
+          <p className="compact-empty-copy">Enable SEO Rankings in Report Content before scheduling ranking checks.</p>
+        </section>
+      )}
 
-      <section className="card spaced-section keyword-metrics-card" id="tracking">
+      {actor.role === "admin" ? <section className="card spaced-section keyword-metrics-card" id="tracking">
         <div>
           <p className="label label-with-icon"><Icon name="graph" />Keyword Demand</p>
           <h3>Search volume and 12-month trends</h3>
@@ -287,9 +335,9 @@ export default async function ProjectDetailPage({
           </form>
         </div>
         {project.keywordMetricsError ? <p className="danger-text metrics-error">{project.keywordMetricsError}</p> : null}
-      </section>
+      </section> : null}
 
-      <details className="configuration-disclosure spaced-section" id="testing">
+      {actor.role === "admin" ? <details className="configuration-disclosure spaced-section" id="testing">
         <summary>
           <span><strong>Testing tools</strong><small>Run controlled sandbox and single-keyword verification checks</small></span>
           <span className="disclosure-action">Show tools</span>
@@ -309,7 +357,7 @@ export default async function ProjectDetailPage({
             liveEnabled={liveEnabled}
           />
         </div>
-      </details>
+      </details> : null}
 
       <section className="grid two" id="tracking-lists" style={{ marginTop: 18 }}>
         <form className="card form" action={createKeywords}>

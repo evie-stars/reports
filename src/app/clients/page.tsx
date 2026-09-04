@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { createClient, importRankHistory } from "@/app/actions";
+import { createClient, importRankHistory, requestReport } from "@/app/actions";
 import { ClientTable } from "@/components/client-table";
 import { Icon } from "@/components/icon";
 import { prisma } from "@/lib/db";
-import { currentActor } from "@/lib/access";
+import { canManageReports, currentActor } from "@/lib/access";
 import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +11,12 @@ export const dynamic = "force-dynamic";
 export default async function ClientsPage({
   searchParams
 }: {
-  searchParams: Promise<{ new?: string; import?: string; importError?: string }>;
+  searchParams: Promise<{ new?: string; import?: string; importError?: string; request?: string; requestSent?: string }>;
 }) {
-  const { new: showNewClient, import: showImport, importError } = await searchParams;
+  const { new: showNewClient, import: showImport, importError, request: showRequest, requestSent } = await searchParams;
   const actor = await currentActor();
-  const canEdit = actor.role === "admin";
+  const canEdit = canManageReports(actor.role);
+  const canImport = actor.role === "admin";
   const { clients, dbUnavailable } = await getClientsData();
 
   return (
@@ -26,14 +27,22 @@ export default async function ClientsPage({
           <p>Open a client to view their latest report.</p>
         </div>
         {canEdit ? <div className="page-header-actions">
-          <Link className="button button-secondary" href={showImport ? "/clients" : "/clients?import=1"}>
+          {canImport ? <Link className="button button-secondary" href={showImport ? "/clients" : "/clients?import=1"}>
             {showImport ? "Close Import" : "Import History"}
-          </Link>
+          </Link> : null}
           <Link className="button" href={showNewClient ? "/clients" : "/clients?new=1"}>
             {showNewClient ? "Close" : "Add Client"}
           </Link>
-        </div> : null}
+        </div> : (
+          <div className="page-header-actions">
+            <Link className="button" href={showRequest ? "/clients" : "/clients?request=1"}>
+              {showRequest ? "Close" : "Request Report"}
+            </Link>
+          </div>
+        )}
       </header>
+
+      {requestSent ? <div className="notice"><strong>Report requested.</strong> An administrator can now review it from the dashboard.</div> : null}
 
       {dbUnavailable ? (
         <div className="notice">
@@ -59,7 +68,7 @@ export default async function ClientsPage({
         </form>
       ) : null}
 
-      {canEdit && showImport ? (
+      {canImport && showImport ? (
         <form className="card form history-import-form" action={importRankHistory}>
           <div className="history-import-heading">
             <div>
@@ -87,7 +96,31 @@ export default async function ClientsPage({
         </form>
       ) : null}
 
-      <section className={`card client-table-card${showNewClient || showImport ? " spaced-section" : ""}`}>
+      {!canEdit && showRequest ? (
+        <form className="card form compact-create-form" action={requestReport}>
+          <div>
+            <p className="label label-with-icon"><Icon name="edit" />Request a Report</p>
+            <p className="muted form-note">Send the client details to the reporting team for setup.</p>
+          </div>
+          <div className="form-row client-create-fields">
+            <label>
+              Client or prospect
+              <input name="clientName" required placeholder="Company name" />
+            </label>
+            <label>
+              Website
+              <input name="websiteUrl" type="url" placeholder="https://example.co.uk" />
+            </label>
+          </div>
+          <label>
+            What is needed?
+            <textarea name="notes" required rows={3} placeholder="Which services, locations or reporting data should be included?" />
+          </label>
+          <SubmitButton pendingLabel="Sending request...">Send Request</SubmitButton>
+        </form>
+      ) : null}
+
+      <section className={`card client-table-card${showNewClient || showImport || showRequest ? " spaced-section" : ""}`}>
         <ClientTable clients={clients} />
       </section>
     </>

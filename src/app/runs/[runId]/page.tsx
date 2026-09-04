@@ -8,7 +8,8 @@ import { currentActor } from "@/lib/access";
 export const dynamic = "force-dynamic";
 
 export default async function RunDetailPage({ params }: { params: Promise<{ runId: string }> }) {
-  await currentActor();
+  const actor = await currentActor();
+  const showCosts = actor.role !== "team";
   const { runId } = await params;
   const run = await prisma.rankRun.findUnique({
     where: { id: runId },
@@ -59,7 +60,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
       {failedRequests.length > 0 ? (
         <div className="notice danger-notice">
           <strong>{failedRequests.length} request{failedRequests.length === 1 ? "" : "s"} failed.</strong>
-          <span> Review the API audit below for the response from DataForSEO.</span>
+          <span>{showCosts ? " Review the API audit below for the provider response." : " A manager can review the technical details."}</span>
         </div>
       ) : null}
 
@@ -73,7 +74,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
         <RunMetric label="Requested" value={run.requestedTasks.toString()} />
         <RunMetric label="Results" value={run.results.length.toString()} />
         <RunMetric label="Matches" value={matchedResults.toString()} />
-        <RunMetric label="Cost" value={`$${run.actualCostUsd.toString()}`} />
+        {showCosts ? <RunMetric label="Cost" value={`$${run.actualCostUsd.toString()}`} /> : null}
       </section>
 
       <section className="card report-table-card run-results-card" style={{ marginTop: 18 }}>
@@ -87,7 +88,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
         <RankMatrix results={matrixResults} emptyMessage="No ranking results were stored for this run." />
       </section>
 
-      <section className="card" style={{ marginTop: 18 }}>
+      {showCosts ? <section className="card" style={{ marginTop: 18 }}>
         <p className="label label-with-icon"><Icon name="settings" />API Audit</p>
         <div className="table-scroll">
           <table className="table">
@@ -120,7 +121,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ runI
             </tbody>
           </table>
         </div>
-      </section>
+      </section> : null}
     </>
   );
 }

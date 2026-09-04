@@ -30,3 +30,13 @@ export async function requireAdmin() {
   if (actor.role !== "admin") throw new Error("Administrator access is required.");
   return actor;
 }
+
+export async function requireManager() {
+  const actor = await currentActor();
+  if (actor.role === "team") throw new Error("Manager access is required.");
+  return actor;
+}
+
+export function canManageReports(role: AppRole) {
+  return role === "admin" || role === "manager";
+}

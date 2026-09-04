@@ -3,11 +3,16 @@ import { currentActor } from "@/lib/access";
 import { Icon } from "@/components/icon";
 import { workerHealth } from "@/lib/worker-health";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { reviewReportRequest } from "@/app/actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const actor = await currentActor();
+  if (actor.role !== "admin") redirect("/clients");
+
   const data = await getDashboardData();
   const dataForSeoConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const liveApiEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
@@ -35,41 +40,46 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="dashboard-command-grid">
-        <section className="dashboard-actions" aria-labelledby="quick-actions-title">
-          <div className="dashboard-section-heading">
-            <p className="label" id="quick-actions-title">Quick Actions</p>
-          </div>
-          <div className="quick-action-grid">
-            {actor.role === "admin" ? (
-              <Link className="quick-action quick-action-client" href="/clients?new=1">
-                <span className="quick-action-icon"><Icon name="contacts" /></span>
-                <span><strong>Add Client</strong><small>Create a new client record</small></span>
-              </Link>
-            ) : null}
-            <Link className="quick-action quick-action-report" href="/clients">
-              <span className="quick-action-icon"><Icon name="edit" /></span>
-              <span><strong>Add Report</strong><small>Choose a client to continue</small></span>
-            </Link>
-          </div>
-        </section>
+      <section className="card configuration-feed dashboard-configuration" aria-labelledby="configuration-title">
+        <div className="dashboard-section-heading">
+          <p className="label label-with-icon" id="configuration-title"><Icon name="settings" />Configuration Status</p>
+          <Link href="/settings">View settings</Link>
+        </div>
+        <div className="configuration-grid">
+          <ConfigurationItem label="DataForSEO" value={dataForSeoConfigured ? "Connected" : "Credentials missing"} good={dataForSeoConfigured} />
+          <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
+          <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
+          <ConfigurationItem label="Rank worker" value={worker.label} good={worker.healthy} />
+          <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
+          <ConfigurationItem label="Failed jobs" value={data.failedRuns ? `${data.failedRuns} in 7 days` : "None"} good={data.failedRuns === 0} />
+          <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
+        </div>
+      </section>
 
-        <section className="card configuration-feed" aria-labelledby="configuration-title">
-          <div className="dashboard-section-heading">
-            <p className="label label-with-icon" id="configuration-title"><Icon name="settings" />Configuration Status</p>
-            <Link href="/settings">View settings</Link>
+      {data.reportRequests.length > 0 ? (
+        <section className="card spaced-section report-request-feed">
+          <div className="section-heading compact-heading">
+            <div><p className="label label-with-icon"><Icon name="edit" />Report Requests</p><h3>Requests from the team</h3></div>
+            <span className="status warn">{data.reportRequests.length} waiting</span>
           </div>
-          <div className="configuration-grid">
-            <ConfigurationItem label="DataForSEO" value={dataForSeoConfigured ? "Connected" : "Credentials missing"} good={dataForSeoConfigured} />
-            <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
-            <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
-            <ConfigurationItem label="Rank worker" value={worker.label} good={worker.healthy} />
-            <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
-            <ConfigurationItem label="Failed jobs" value={data.failedRuns ? `${data.failedRuns} in 7 days` : "None"} good={data.failedRuns === 0} />
-            <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
+          <div className="table-scroll">
+            <table className="table">
+              <thead><tr><th>Client / Prospect</th><th>Requested By</th><th>Details</th><th>Date</th><th><span className="sr-only">Action</span></th></tr></thead>
+              <tbody>
+                {data.reportRequests.map((request) => (
+                  <tr key={request.id}>
+                    <td><strong>{request.clientName}</strong>{request.websiteUrl ? <small className="row-context">{request.websiteUrl}</small> : null}</td>
+                    <td>{request.requestedByName ?? request.requestedByEmail}<small className="row-context">{request.requestedByEmail}</small></td>
+                    <td className="request-notes">{request.notes}</td>
+                    <td>{request.createdAt.toLocaleDateString("en-GB")}</td>
+                    <td className="table-action-cell"><form action={reviewReportRequest.bind(null, request.id)}><SubmitButton className="button button-secondary" pendingLabel="Updating...">Mark Reviewed</SubmitButton></form></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
-      </div>
+      ) : null}
 
       <section className="summary-strip spaced-section" aria-label="Reporting summary">
         <SummaryItem label="Clients" value={data.clients} />
@@ -113,7 +123,7 @@ export default async function DashboardPage() {
 async function getDashboardData() {
   try {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs] = await Promise.all([
+    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
@@ -126,10 +136,11 @@ async function getDashboardData() {
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { project: { include: { client: true } } }
-      })
+      }),
+      prisma.reportRequest.findMany({ where: { status: "pending" }, orderBy: { createdAt: "asc" }, take: 10 })
     ]);
 
-    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, heartbeat, runs, reportRequests, dbUnavailable: false };
   } catch {
     return {
       clients: 0,
@@ -141,6 +152,7 @@ async function getDashboardData() {
       failedRuns: 0,
       heartbeat: null,
       runs: [],
+      reportRequests: [],
       dbUnavailable: true
     };
   }

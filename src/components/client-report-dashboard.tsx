@@ -19,7 +19,7 @@ export function ClientReportDashboard({
 
   return (
     <>
-      <section className="report-stat-grid" aria-label="Ranking summary">
+      {data.modules.rankings ? <section className="report-stat-grid" aria-label="Ranking summary">
         <ReportStat label="Top 3 Keywords" value={stats.topThree} detail="Highest visibility" tone="blue" />
         <ReportStat label="Page 1 Keywords" value={stats.pageOne} detail={`of ${stats.activeKeywords} active`} tone="green" />
         <ReportStat label="Top 20 Keywords" value={stats.topTwenty} detail="Within two pages" tone="dark" />
@@ -29,9 +29,9 @@ export function ClientReportDashboard({
           detail={stats.averageRank === null ? "No ranking data" : "Across current results"}
           tone="neutral"
         />
-      </section>
+      </section> : null}
 
-      <section className="card trend-card spaced-section">
+      {data.modules.rankings ? <section className="card trend-card spaced-section">
         <div className="section-heading report-section-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Ranking Progress</p>
@@ -45,13 +45,13 @@ export function ClientReportDashboard({
           </div>
         </div>
         <PositionDistributionChart points={data.trend} />
-      </section>
+      </section> : null}
 
-      {data.gsc.mapped && (!readOnly || data.gsc.trend.length > 0) ? (
+      {data.modules.gsc && data.gsc.mapped && (!readOnly || data.gsc.trend.length > 0) ? (
         <SearchConsolePerformance data={data.gsc} />
       ) : null}
 
-      <form className="report-filters spaced-section" action={basePath} method="get">
+      {data.modules.rankings ? <form className="report-filters spaced-section" action={basePath} method="get">
         <input type="hidden" name="sort" value={filters.sort} />
         <input type="hidden" name="dir" value={filters.sortDirection} />
         <FilterSelect label="Period" name="period" value={filters.period}>
@@ -88,9 +88,9 @@ export function ClientReportDashboard({
           <button className="button" type="submit">Apply</button>
           <Link className="button button-secondary" href={basePath}>Reset</Link>
         </div>
-      </form>
+      </form> : null}
 
-      <section className="card report-table-card spaced-section">
+      {data.modules.rankings ? <section className="card report-table-card spaced-section">
         <div className="section-heading compact-heading">
           <div>
             <p className="label label-with-icon"><Icon name="graph" />Ranking Results</p>
@@ -110,9 +110,17 @@ export function ClientReportDashboard({
           showChecked
           showVolume
         />
-      </section>
+      </section> : null}
 
-      {data.selectedKeyword ? (
+      {!data.modules.rankings && !(data.modules.gsc && data.gsc.mapped) ? (
+        <section className="card report-empty-state">
+          <p className="label label-with-icon"><Icon name="graph" />Report Content</p>
+          <h3>No reporting data is available yet</h3>
+          <p className="muted">A manager can enable an available data source from the report settings.</p>
+        </section>
+      ) : null}
+
+      {data.modules.rankings && data.selectedKeyword ? (
         <KeywordDrawer
           closeHref={closeDrawerHref}
           history={data.keywordHistory}
@@ -204,7 +212,8 @@ function PositionDistributionChart({ points }: { points: ClientReportData["trend
   const y = (value: number) => height - padding.bottom - value * ((height - padding.top - padding.bottom) / maxTotal);
   const gridValues = Array.from(new Set([0, Math.ceil(maxTotal / 2), maxTotal]));
   const buckets = [
-    { key: "beyondTwenty", label: "#21+", className: "beyond-twenty" },
+    { key: "beyondThirty", label: "#31+", className: "beyond-thirty" },
+    { key: "twentyOneToThirty", label: "#21-30", className: "twenty-one-thirty" },
     { key: "elevenToTwenty", label: "#11-20", className: "eleven-twenty" },
     { key: "fourToTen", label: "#4-10", className: "four-ten" },
     { key: "twoToThree", label: "#2-3", className: "two-three" },

@@ -25,6 +25,7 @@ export default async function SettingsPage({ searchParams }: {
   const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
   const allowedAccessConfigured = Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
+  const managerAccessConfigured = Boolean(process.env.AUTH_MANAGER_EMAILS);
   const gscConfigured = googleSearchConsoleConfigured();
   const budget = await getDataForSeoBudgetSummary();
   const weekAgo = sevenDaysAgo();
@@ -143,8 +144,12 @@ export default async function SettingsPage({ searchParams }: {
                 <td><span className={allowedAccessConfigured ? "status good" : "status danger"}>{allowedAccessConfigured ? "Configured" : "Missing"}</span></td>
               </tr>
               <tr>
-                <th>Sales Cooldown</th>
-                <td>{process.env.RANK_SALES_COOLDOWN_DAYS ?? "7"} days</td>
+                <th>Access Roles</th>
+                <td><span className={managerAccessConfigured ? "status good" : "status warn"}>{managerAccessConfigured ? "Admin · Manager · Team" : "Admin · Team"}</span></td>
+              </tr>
+              <tr>
+                <th>Team Re-run Cooldown</th>
+                <td>{process.env.RANK_TEAM_COOLDOWN_DAYS ?? process.env.RANK_SALES_COOLDOWN_DAYS ?? "7"} days</td>
               </tr>
               <tr>
                 <th>Session Lifetime</th>

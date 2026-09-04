@@ -101,11 +101,12 @@ test("groups result types and devices into one ranking row per keyword and area"
 });
 
 test("counts keyword positions in the correct distribution bands", () => {
-  assert.deepEqual(countPositionBuckets([1, 2, 3, 4, 10, 11, 20, 21, null]), {
+  assert.deepEqual(countPositionBuckets([1, 2, 3, 4, 10, 11, 20, 21, 30, 31, null]), {
     first: 1,
     twoToThree: 2,
     fourToTen: 2,
     elevenToTwenty: 2,
-    beyondTwenty: 2
+    twentyOneToThirty: 2,
+    beyondThirty: 2
   });
 });

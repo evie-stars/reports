@@ -3,7 +3,7 @@ import Google from "next-auth/providers/google";
 import { writeAuditLog } from "@/lib/audit";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 
-export type AppRole = "admin" | "sales";
+export type AppRole = "admin" | "manager" | "team";
 
 const authEnabled = process.env.AUTH_ENABLED === "true";
 const sessionMaxAgeSeconds = positiveInteger(process.env.AUTH_SESSION_MAX_AGE_HOURS, 10) * 60 * 60;
@@ -63,7 +63,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     session({ session, token }) {
-      if (session.user) session.user.role = token.role === "admin" ? "admin" : "sales";
+      if (session.user) {
+        session.user.role = token.role === "admin" || token.role === "manager" ? token.role : "team";
+      }
       return session;
     },
     authorized({ auth: session, request }) {
@@ -84,7 +86,10 @@ function emailAllowed(email: string) {
 }
 
 function roleForEmail(email: string): AppRole {
-  return envList("AUTH_ADMIN_EMAILS").includes(email.toLowerCase()) ? "admin" : "sales";
+  const normalizedEmail = email.toLowerCase();
+  if (envList("AUTH_ADMIN_EMAILS").includes(normalizedEmail)) return "admin";
+  if (envList("AUTH_MANAGER_EMAILS").includes(normalizedEmail)) return "manager";
+  return "team";
 }
 
 function envList(name: string) {

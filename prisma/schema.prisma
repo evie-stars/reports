@@ -73,6 +73,18 @@ enum GscImportStatus {
   failed
 }
 
+enum ReportModule {
+  rankings
+  gsc
+  ga4
+}
+
+enum ReportRequestStatus {
+  pending
+  reviewed
+  completed
+}
+
 model Client {
   id             String    @id @default(cuid())
   name           String
@@ -87,6 +99,21 @@ model Client {
   projects       Project[]
 }
 
+model ReportRequest {
+  id               String              @id @default(cuid())
+  clientName       String
+  websiteUrl       String?
+  notes            String?
+  requestedByEmail String
+  requestedByName  String?
+  status           ReportRequestStatus @default(pending)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByEmail, createdAt])
+}
+
 model Project {
   id                             String                         @id @default(cuid())
   clientId                       String
@@ -99,6 +126,7 @@ model Project {
   scheduleDevices                Device[]                       @default([desktop])
   scheduleSearchTypes            SearchType[]                   @default([organic])
   schedulePageLimit              Int                            @default(10)
+  reportModules                  ReportModule[]                  @default([rankings, gsc])
   keywordMetricsStatus           KeywordMetricsStatus           @default(idle)
   keywordMetricsTaskId           String?
   keywordMetricsRequestedAt      DateTime?

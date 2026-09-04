@@ -10,14 +10,15 @@ export const dynamic = "force-dynamic";
 
 export default async function RunsPage() {
   const actor = await currentActor();
-  const { runs, schedules, budget, dbUnavailable } = await getRunsData();
+  const showCosts = actor.role !== "team";
+  const { runs, budget, dbUnavailable } = await getRunsData(showCosts);
 
   return (
     <>
       <header className="page-header">
         <div>
           <h2>Rank Runs</h2>
-          <p>Audit trail for every sandbox and live ranking request, including task count, parsed results, status, and actual API cost.</p>
+          <p>{showCosts ? "Audit trail for every ranking request, including progress, status and API cost." : "Report progress and the history of requested ranking checks."}</p>
         </div>
       </header>
 
@@ -28,41 +29,16 @@ export default async function RunsPage() {
         </div>
       ) : null}
 
-      <section className="summary-strip queue-summary" aria-label="Queue and budget summary">
+      {showCosts ? <section className="summary-strip queue-summary" aria-label="Queue and budget summary">
         <Summary label="Monthly limit" value={`$${budget.limitUsd.toFixed(2)}`} />
         <Summary label="Spent" value={`$${budget.spentUsd.toFixed(4)}`} />
         <Summary label="Reserved" value={`$${budget.reservedUsd.toFixed(4)}`} />
         <Summary label="Available" value={`$${budget.availableUsd.toFixed(4)}`} />
-      </section>
-
-      <section className={`card spaced-section${schedules.length === 0 ? " compact-empty-section" : ""}`}>
-        <div className="section-heading compact-heading">
-          <div><p className="label label-with-icon"><Icon name="settings" />Monthly Schedules</p><h3>Upcoming automated reports</h3></div>
-          <span className="muted">{schedules.length} enabled</span>
-        </div>
-        {schedules.length === 0 ? (
-          <p className="compact-empty-copy">No monthly schedules are enabled. Configure a report to add it here.</p>
-        ) : <div className="table-scroll">
-          <table className="table queue-table">
-            <thead><tr><th>Client / Report</th><th>Next run</th><th>Keywords</th><th>Areas</th><th>Method</th></tr></thead>
-            <tbody>
-              {schedules.map((project) => (
-                <tr key={project.id}>
-                  <td><Link href={`/projects/${project.id}`}>{project.client.name} / {project.name}</Link></td>
-                  <td>{nextScheduleDate(project.scheduleDay).toLocaleDateString("en-GB")}</td>
-                  <td>{project._count.keywords}</td>
-                  <td>{project._count.locations}</td>
-                  <td><span className="status good">Standard</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>}
-      </section>
+      </section> : null}
 
       <section className="card spaced-section">
         <div className="section-heading compact-heading"><div><p className="label label-with-icon"><Icon name="graph" />Queue Operations</p><h3>Report history and progress</h3></div></div>
-        <div className="table-scroll"><table className="table queue-table queue-history-table">
+        <div className="table-scroll"><table className={`table queue-table queue-history-table${showCosts ? "" : " team-cost-hidden"}`}>
           <thead>
             <tr>
               <th>Date</th>
@@ -70,7 +46,7 @@ export default async function RunsPage() {
               <th>Status</th>
               <th>Method</th>
               <th>Progress</th>
-              <th>Cost</th>
+              {showCosts ? <th>Cost</th> : null}
               <th>Requested by</th>
               <th><span className="sr-only">Actions</span></th>
             </tr>
@@ -79,18 +55,18 @@ export default async function RunsPage() {
             {runs.map((run) => (
               <tr key={run.id}>
                 <td><Link href={`/runs/${run.id}`}>{run.createdAt.toLocaleDateString("en-GB")}</Link></td>
-                <td><Link href={`/projects/${run.project.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
+                <td><Link href={actor.role === "team" ? `/clients/${run.project.client.id}` : `/projects/${run.project.id}`}>{run.project.client.name} / {run.project.name}</Link></td>
                 <td>
                   <span className={`status ${statusTone(run.status)}`}>{run.status}</span>
                   {run.nextPollAt ? <small className="row-context">Next check {run.nextPollAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</small> : null}
-                  {run.lastError ? <small className="queue-error" title={run.lastError}>{readableRunError(run.lastError)}</small> : null}
+                  {run.lastError ? <small className="queue-error" title={actor.role === "team" ? undefined : run.lastError}>{actor.role === "team" ? "Manager review required." : readableRunError(run.lastError)}</small> : null}
                 </td>
                 <td>{readableMethod(run.deliveryMethod)}</td>
                 <td>
                   <strong>{run.completedTasks + run.failedTasks} / {run.requestedTasks}</strong>
                   <small className="row-context">{run.failedTasks ? `${run.failedTasks} failed` : `${run.results.length} stored`}</small>
                 </td>
-                <td><strong>${run.actualCostUsd.toString()}</strong><small className="row-context">est. ${run.estimatedCostUsd.toString()}</small></td>
+                {showCosts ? <td><strong>${run.actualCostUsd.toString()}</strong><small className="row-context">est. ${run.estimatedCostUsd.toString()}</small></td> : null}
                 <td>{run.requestedByEmail ?? "System"}</td>
                 <td className="table-action-cell">
                   {actor.role === "admin" && (run.status === "failed" || run.status === "blocked") && run.selection ? (
@@ -101,7 +77,7 @@ export default async function RunsPage() {
             ))}
             {runs.length === 0 ? (
               <tr>
-                <td colSpan={8} className="muted">No runs stored yet.</td>
+                <td colSpan={showCosts ? 8 : 7} className="muted">No runs stored yet.</td>
               </tr>
             ) : null}
           </tbody>
@@ -111,30 +87,21 @@ export default async function RunsPage() {
   );
 }
 
-async function getRunsData() {
+async function getRunsData(includeBudget: boolean) {
   try {
-    const [runs, schedules, budget] = await Promise.all([
+    const [runs, budget] = await Promise.all([
       prisma.rankRun.findMany({
         orderBy: { createdAt: "desc" },
         take: 50,
         include: { project: { include: { client: true } }, results: true }
       }),
-      prisma.project.findMany({
-        where: { scheduleEnabled: true },
-        orderBy: [{ scheduleDay: "asc" }, { name: "asc" }],
-        include: {
-          client: true,
-          _count: { select: { keywords: { where: { active: true } }, locations: { where: { active: true } } } }
-        }
-      }),
-      getDataForSeoBudgetSummary()
+      includeBudget ? getDataForSeoBudgetSummary() : Promise.resolve({ limitUsd: 0, spentUsd: 0, reservedUsd: 0, availableUsd: 0 })
     ]);
 
-    return { runs, schedules, budget, dbUnavailable: false };
+    return { runs, budget, dbUnavailable: false };
   } catch {
     return {
       runs: [],
-      schedules: [],
       budget: { limitUsd: 1, spentUsd: 0, reservedUsd: 0, availableUsd: 1 },
       dbUnavailable: true
     };
@@ -143,12 +110,6 @@ async function getRunsData() {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function nextScheduleDate(day: number) {
-  const now = new Date();
-  const current = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 12));
-  return current >= now ? current : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, 12));
 }
 
 function statusTone(status: string) {
