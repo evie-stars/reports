@@ -2,6 +2,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ClientReportDashboard } from "@/components/client-report-dashboard";
 import { StatusPill } from "@/components/ui/status-pill";
+import { writeRequestAudit } from "@/lib/audit";
 import { getClientReportData, type ReportSearchParams } from "@/lib/client-report";
 import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/format";
@@ -26,7 +27,20 @@ export default async function SharedClientReportPage({ params, searchParams }: {
     client.shareExpiresAt <= new Date()
   ) notFound();
 
-  const reportData = await getClientReportData(client.id, resolvedSearchParams);
+  // Every view of a bearer link is counted on the client and recorded in the audit trail with the caller address.
+  const [reportData] = await Promise.all([
+    getClientReportData(client.id, resolvedSearchParams),
+    prisma.client.update({
+      where: { id: client.id },
+      data: { shareAccessCount: { increment: 1 }, shareLastAccessedAt: new Date() }
+    }),
+    writeRequestAudit({
+      event: "client_share.accessed",
+      entityType: "client",
+      entityId: client.id,
+      metadata: { section: resolvedSearchParams.section ?? "overview" }
+    })
+  ]);
   if (!reportData) notFound();
 
   return (
