@@ -1,10 +1,12 @@
-import { decryptGscToken } from "@/lib/gsc-crypto";
+import { resolveSecret } from "@/lib/app-secrets";
 import { fetchWithTimeout, readJsonResponse } from "@/lib/http";
+import { decryptSecret, masterEncryptionKeyConfigured } from "@/lib/secret-crypto";
 
 /**
  * One read-only Google OAuth client serves every reporting integration. Each product asks for
  * its own scope with incremental authorisation, so an account can hold Search Console access,
- * Analytics access, or both, behind a single stored refresh token.
+ * Analytics access, or both, behind a single stored refresh token. The client ID and secret come
+ * from the app's key store, falling back to the server environment.
  */
 
 /** Google reads can be repeated safely; the one-time authorization-code exchange cannot. */
@@ -36,6 +38,9 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 
+export const GOOGLE_CREDENTIALS_MISSING_MESSAGE =
+  "Google integration credentials are not configured. Add them in Settings or set GOOGLE_SEARCH_CONSOLE_CLIENT_ID and GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET.";
+
 export type GoogleOauthConfig = {
   clientId: string;
   clientSecret: string;
@@ -56,25 +61,42 @@ export function isGoogleIntegrationProduct(value: string | null | undefined): va
   return typeof value === "string" && Object.hasOwn(GOOGLE_INTEGRATION_PRODUCTS, value);
 }
 
-export function googleIntegrationsConfigured() {
-  const encryptionKey = process.env.GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY ?? "";
-  return Boolean(
-    process.env.GOOGLE_SEARCH_CONSOLE_CLIENT_ID &&
-    process.env.GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET &&
-    process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI &&
-    /^[a-f0-9]{64}$/i.test(encryptionKey)
-  );
+/** Client credentials from the key store (or the environment) plus the deployment's redirect URI. */
+export async function resolveGoogleIntegrationsConfig(): Promise<GoogleOauthConfig | null> {
+  const redirectUri = process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI ?? "";
+  const { values } = await resolveSecret("google-integrations");
+  if (!values || !redirectUri) return null;
+  return { clientId: values.clientId, clientSecret: values.clientSecret, redirectUri };
 }
 
-export function googleIntegrationsOauthConfig(): GoogleOauthConfig {
-  const config = {
-    clientId: process.env.GOOGLE_SEARCH_CONSOLE_CLIENT_ID ?? "",
-    clientSecret: process.env.GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET ?? "",
-    redirectUri: process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI ?? ""
-  };
-  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
-    throw new Error("Google integration OAuth credentials are not configured.");
+export type GoogleIntegrationsSetup = {
+  credentials: boolean;
+  redirectUri: boolean;
+  masterKey: boolean;
+  configured: boolean;
+};
+
+/** Which of the three prerequisites for a Google connection are in place. */
+export async function googleIntegrationsSetup(): Promise<GoogleIntegrationsSetup> {
+  const masterKey = masterEncryptionKeyConfigured();
+  const redirectUri = Boolean(process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI);
+  let credentials = false;
+  try {
+    credentials = Boolean((await resolveSecret("google-integrations")).values);
+  } catch (error) {
+    console.warn("[google] Integration credentials could not be resolved", error);
   }
+  return { credentials, redirectUri, masterKey, configured: credentials && redirectUri && masterKey };
+}
+
+/** True when a connection could be started: credentials, redirect URI, and the master key are all present. */
+export async function googleIntegrationsConfigured() {
+  return (await googleIntegrationsSetup()).configured;
+}
+
+async function requireGoogleIntegrationsConfig() {
+  const config = await resolveGoogleIntegrationsConfig();
+  if (!config) throw new Error(GOOGLE_CREDENTIALS_MISSING_MESSAGE);
   return config;
 }
 
@@ -83,11 +105,7 @@ export function googleIntegrationsOauthConfig(): GoogleOauthConfig {
  * account already granted this client into the new token, so granting Analytics later does not
  * drop Search Console access.
  */
-export function buildGoogleAuthorizationUrl(
-  state: string,
-  scopes: readonly string[],
-  config = googleIntegrationsOauthConfig()
-) {
+export function buildGoogleAuthorizationUrl(state: string, scopes: readonly string[], config: GoogleOauthConfig) {
   const url = new URL(GOOGLE_AUTH_URL);
   url.search = new URLSearchParams({
     access_type: "offline",
@@ -110,7 +128,7 @@ export function googleIntegrationsAppUrl(pathname: string) {
 }
 
 export async function exchangeGoogleAuthorizationCode(code: string) {
-  const config = googleIntegrationsOauthConfig();
+  const config = await requireGoogleIntegrationsConfig();
   const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -151,11 +169,11 @@ export async function googleAccountForAccessToken(accessToken: string) {
 
 /** Mint a short-lived access token from the stored (encrypted) refresh token. */
 export async function googleAccessTokenForConnection(encryptedRefreshToken: string) {
-  return refreshGoogleAccessToken(decryptGscToken(encryptedRefreshToken));
+  return refreshGoogleAccessToken(decryptSecret(encryptedRefreshToken));
 }
 
 export async function refreshGoogleAccessToken(refreshToken: string) {
-  const config = googleIntegrationsOauthConfig();
+  const config = await requireGoogleIntegrationsConfig();
   const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

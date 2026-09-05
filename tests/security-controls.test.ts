@@ -6,6 +6,7 @@ import {
   configuredPositiveInteger,
   gscImportRateLimit,
   paidRunRateLimit,
+  secretChangeRateLimit,
   shareRateLimit
 } from "../src/lib/rate-limit";
 import { workerHealth } from "../src/lib/worker-health";
@@ -16,6 +17,7 @@ test("uses conservative default rate-limit policies", () => {
   assert.deepEqual(shareRateLimit(), { limit: 10, windowSeconds: 3600 });
   assert.deepEqual(gscImportRateLimit(), { limit: 6, windowSeconds: 3600 });
   assert.deepEqual(apiRateLimit(), { limit: 60, windowSeconds: 60 });
+  assert.deepEqual(secretChangeRateLimit(), { limit: 10, windowSeconds: 3600 });
 });
 
 test("rejects missing and invalid positive integer configuration", () => {

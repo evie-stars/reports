@@ -23,6 +23,7 @@
 - Workspace restyled to match the Team Hub design system (Tailwind, Poppins, shared icon set).
 - Google Analytics 4 connected through the shared read-only Google client, with per-report property mapping, 90-day imports split by channel, and an Analytics card on the client report and in snapshots.
 - Scheduled reports refresh mapped Analytics properties alongside Search Console, with stranded imports retried and lock collisions re-queued.
+- DataForSEO and Google client credentials managed from Settings: encrypted, write-only, verified with the provider before saving, with rollback, an environment kill-switch, and a master-key rotation script.
 
 ## Next Integration Phase
 

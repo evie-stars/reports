@@ -11,6 +11,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
+import { secretStatus } from "@/lib/app-secrets";
 import { prisma } from "@/lib/db";
 import { formatDate, formatUsd, plural } from "@/lib/format";
 import { roleLabel } from "@/lib/roles";
@@ -24,7 +25,13 @@ export default async function DashboardPage() {
   if (actor.role !== "admin") redirect("/clients");
 
   const data = await getDashboardData();
-  const dataForSeoConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const dataForSeoSecret = await secretStatus("dataforseo");
+  const dataForSeoConfigured = dataForSeoSecret.configured;
+  const dataForSeoLabel = dataForSeoSecret.unavailable
+    ? "Key store unavailable"
+    : dataForSeoConfigured
+      ? "Connected"
+      : dataForSeoSecret.source === "app" ? "Stored key unreadable" : "Credentials missing";
   const liveApiEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const googleSignInEnabled = process.env.AUTH_ENABLED === "true";
   const worker = workerHealth(data.heartbeat);
@@ -66,7 +73,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 auto-rows-min">
         <SectionCard title="Configuration" icon="cog" aside={<Link href="/settings" className="text-xs link">All settings →</Link>}>
           <ul className="divide-y divide-line">
-            <ConfigurationItem label="DataForSEO" value={dataForSeoConfigured ? "Connected" : "Credentials missing"} good={dataForSeoConfigured} />
+            <ConfigurationItem label="DataForSEO" value={dataForSeoLabel} good={dataForSeoConfigured} />
             <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
             <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
             <ConfigurationItem label="Rank worker" value={worker.label} good={worker.healthy} />
@@ -102,7 +109,7 @@ export default async function DashboardPage() {
 
         <SectionCard
           title="Users and roles"
-          subtitle="Role changes apply on the user's next page load. Keep at least one email in AUTH_ADMIN_EMAILS as emergency access."
+          subtitle="Role changes apply on the user's next page load. Keep at least one email in AUTH_ADMIN_EMAILS as emergency access; those environment administrators are also the only ones who can change API keys."
           icon="users"
           className="md:col-span-3"
           aside={<span className="text-xs text-slate">{activeUsers} active</span>}

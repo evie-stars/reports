@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { disconnectGoogleConnection } from "@/actions/integrations";
 import { Icon } from "@/components/icon";
+import { ApiKeyCard } from "@/components/settings/api-key-card";
 import { SubmitButton } from "@/components/submit-button";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
@@ -9,6 +10,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
+import { allSecretStatuses, canManageSecrets, isSecretName, SECRET_DEFINITIONS, secretStoreLocked } from "@/lib/app-secrets";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { formatDate, formatDateTime, formatUsd, plural, readableAuditEvent, readableValue, type Tone } from "@/lib/format";
@@ -16,11 +18,13 @@ import {
   connectionHasScope,
   GA4_READONLY_SCOPE,
   GOOGLE_INTEGRATION_PRODUCTS,
-  googleIntegrationsConfigured,
+  googleIntegrationsSetup,
   GSC_READONLY_SCOPE,
   isGoogleIntegrationProduct,
-  type GoogleIntegrationProduct
+  type GoogleIntegrationProduct,
+  type GoogleIntegrationsSetup
 } from "@/lib/google-oauth";
+import { MASTER_KEY_ENV, masterEncryptionKeyConfigured, readPreviousEncryptionKey } from "@/lib/secret-crypto";
 import { workerHealth } from "@/lib/worker-health";
 
 export const dynamic = "force-dynamic";
@@ -35,9 +39,16 @@ type GoogleConnectionRow = {
 };
 
 export default async function SettingsPage({ searchParams }: {
-  searchParams: Promise<{ google?: string; googleWarning?: string; googleError?: string }>;
+  searchParams: Promise<{
+    google?: string;
+    googleWarning?: string;
+    googleError?: string;
+    secret?: string;
+    secretName?: string;
+    secretError?: string;
+  }>;
 }) {
-  const { google, googleWarning, googleError } = await searchParams;
+  const { google, googleWarning, googleError, secret, secretName, secretError } = await searchParams;
   const actor = await currentActor();
   if (actor.role !== "admin") redirect("/");
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
@@ -45,10 +56,22 @@ export default async function SettingsPage({ searchParams }: {
   const maxLiveTasks = process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1";
   const maxStandardTasks = process.env.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN ?? "1000";
   const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
-  const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
-  const googleConfigured = googleIntegrationsConfigured();
-  const { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable } = await getSettingsData();
+  const [googleSetup, secrets, { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
+    googleIntegrationsSetup(),
+    allSecretStatuses(),
+    getSettingsData()
+  ]);
+  const googleConfigured = googleSetup.configured;
+  const dataForSeoSecret = secrets.find((summary) => summary.name === "dataforseo");
+  const credentialsConfigured = dataForSeoSecret?.configured ?? false;
+  const canRotateKeys = canManageSecrets(actor);
+  const keyStoreDisabledReason = masterEncryptionKeyConfigured()
+    ? undefined
+    : `${MASTER_KEY_ENV} is not set on the server. Generate one with "openssl rand -hex 32", add it in Plesk, and restart the app.`;
+  const keyStoreUsable = !keyStoreDisabledReason && !secretStoreLocked();
+  const previousKeyConfigured = Boolean(readPreviousEncryptionKey());
+  const secretLabel = isSecretName(secretName) ? SECRET_DEFINITIONS[secretName].label : "API key";
   const worker = workerHealth(heartbeat);
   const allowedAccessConfigured = managedUsers > 0 || Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
   const gscConnections = connections.filter((connection) => connectionHasScope(connection, GSC_READONLY_SCOPE));
@@ -75,6 +98,19 @@ export default async function SettingsPage({ searchParams }: {
         </Notice>
       ) : null}
       {googleError ? <Notice tone="danger" title="Google account was not connected.">{googleError}</Notice> : null}
+      {secret === "saved" ? <Notice tone="success" title={`${secretLabel} credentials saved and verified.`}>They apply to new requests immediately.</Notice> : null}
+      {secret === "saved-unverified" ? (
+        <Notice tone="warn" title={`${secretLabel} credentials saved, but could not be verified.`}>The provider did not answer conclusively. Run a test from the card below.</Notice>
+      ) : null}
+      {secret === "verified" ? <Notice tone="success" title={`${secretLabel} credentials verified.`}>The provider accepted them.</Notice> : null}
+      {secret === "rolled-back" ? <Notice tone="success" title={`Previous ${secretLabel} credentials restored.`}>Run a test to confirm they still work.</Notice> : null}
+      {secret === "removed" ? <Notice tone="success" title={`${secretLabel} credentials removed from the app.`}>The server environment value is used now, if one is set.</Notice> : null}
+      {secretError ? <Notice tone="danger" title={`${secretLabel} credentials were not changed.`} role="alert">{secretError}</Notice> : null}
+      {previousKeyConfigured ? (
+        <Notice tone="warn" title="A previous master key is still configured.">
+          Stored values still open with it for now. Run <code className="font-mono text-xs">npm run secrets:rekey</code>, then remove APP_SECRETS_PREVIOUS_ENCRYPTION_KEY and the legacy GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY.
+        </Notice>
+      ) : null}
       {dbUnavailable ? (
         <Notice tone="warn" title="Database not connected yet.">Budget, worker health, connections and audit events will appear here once the database is configured.</Notice>
       ) : null}
@@ -83,7 +119,13 @@ export default async function SettingsPage({ searchParams }: {
         <SectionCard title="DataForSEO" subtitle="Ranking data provider" icon="cog">
           <dl className="divide-y divide-line text-sm">
             <SettingRow label="Credentials">
-              <StatusPill tone={credentialsConfigured ? "accent" : "blocked"}>{credentialsConfigured ? "Configured" : "Missing"}</StatusPill>
+              <StatusPill tone={credentialsConfigured ? "accent" : "blocked"}>
+                {dataForSeoSecret?.unavailable
+                  ? "Store unavailable"
+                  : !credentialsConfigured
+                    ? dataForSeoSecret?.source === "app" ? "Unreadable" : "Missing"
+                    : dataForSeoSecret?.source === "app" ? "Stored in app" : "Server environment"}
+              </StatusPill>
             </SettingRow>
             <SettingRow label="Default mode">{sandbox ? "Sandbox" : "Live"}</SettingRow>
             <SettingRow label="Live enabled">
@@ -109,6 +151,8 @@ export default async function SettingsPage({ searchParams }: {
           subtitle="Organic performance data"
           icon="search"
           configured={googleConfigured}
+          setup={googleSetup}
+          keyStoreUsable={keyStoreUsable}
           connections={gscConnections}
           otherConnections={connections.length - gscConnections.length}
           mappedCount={(connection) => connection._count.gscProjects}
@@ -121,6 +165,8 @@ export default async function SettingsPage({ searchParams }: {
           subtitle="Website traffic and engagement"
           icon="zoom-in"
           configured={googleConfigured}
+          setup={googleSetup}
+          keyStoreUsable={keyStoreUsable}
           connections={ga4Connections}
           otherConnections={connections.length - ga4Connections.length}
           mappedCount={(connection) => connection._count.ga4Projects}
@@ -161,6 +207,20 @@ export default async function SettingsPage({ searchParams }: {
             </SettingRow>
           </dl>
         </SectionCard>
+      </div>
+
+      <div id="api-keys" className="mt-6">
+        <div className="mb-3">
+          <h2 className="text-base">API keys</h2>
+          <p className="text-xs text-slate mt-0.5">
+            Rotate provider credentials without touching the server. Values are encrypted with the server-held key, never shown again, and audited on every change.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {secrets.map((summary) => (
+            <ApiKeyCard key={summary.name} summary={summary} canManage={canRotateKeys} disabledReason={keyStoreDisabledReason} />
+          ))}
+        </div>
       </div>
 
       <SectionCard
@@ -210,6 +270,8 @@ function GoogleProductCard({
   subtitle,
   icon,
   configured,
+  setup,
+  keyStoreUsable,
   connections,
   otherConnections,
   mappedCount,
@@ -220,6 +282,9 @@ function GoogleProductCard({
   subtitle: string;
   icon: "search" | "zoom-in";
   configured: boolean;
+  setup: GoogleIntegrationsSetup;
+  /** False when the in-app key store cannot take a value (no master key, or locked to the environment). */
+  keyStoreUsable: boolean;
   connections: GoogleConnectionRow[];
   /** Connected accounts that have not granted this product. */
   otherConnections: number;
@@ -233,7 +298,7 @@ function GoogleProductCard({
   return (
     <SectionCard title={title} subtitle={subtitle} icon={icon} aside={<StatusPill tone={tone}>{status}</StatusPill>}>
       {!configured ? (
-        <p className="text-sm text-slate">Add the four Google integration environment variables before connecting an account.</p>
+        <p className="text-sm text-slate">Before an account can be connected: {missingGoogleSetup(setup, keyStoreUsable)}.</p>
       ) : connections.length === 0 ? (
         <div className="flex flex-col items-start gap-3">
           <p className="text-sm text-slate">{intro}</p>
@@ -275,6 +340,19 @@ function GoogleProductCard({
       )}
     </SectionCard>
   );
+}
+
+function missingGoogleSetup(setup: GoogleIntegrationsSetup, keyStoreUsable: boolean) {
+  const missing = [
+    ...(setup.masterKey ? [] : [`set ${MASTER_KEY_ENV} in Plesk`]),
+    ...(setup.redirectUri ? [] : ["set GOOGLE_SEARCH_CONSOLE_REDIRECT_URI in Plesk"]),
+    ...(setup.credentials
+      ? []
+      : [keyStoreUsable
+        ? "save the Google client ID and secret under API keys below"
+        : "set GOOGLE_SEARCH_CONSOLE_CLIENT_ID and GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET in Plesk"])
+  ];
+  return missing.join(", then ");
 }
 
 function connectHref(product: GoogleIntegrationProduct) {

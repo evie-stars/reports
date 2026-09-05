@@ -32,6 +32,28 @@ test("keeps every paid endpoint blocked until explicitly enabled", () => {
   assert.throws(() => client.assertKeywordMetricsEnabled(), /Paid DataForSEO calls are blocked/);
 });
 
+test("injected credentials are sent as Basic auth without touching the environment", async () => {
+  const client = new DataForSeoClient(
+    { DATAFORSEO_SANDBOX: "true", DATAFORSEO_LIVE_ENABLED: "false" },
+    { credentials: { login: "name@example.test", password: "p@ss" } }
+  );
+  const seen: string[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen.push(String(new Headers(init?.headers).get("authorization")));
+    return new Response(JSON.stringify({
+      tasks: [{ result: [{ location_code: 1, location_name: "Test,Zone", country_iso_code: "ZZ", location_type: "City" }] }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const locations = await client.getGoogleLocations("zz");
+    assert.equal(locations.length, 1);
+    assert.deepEqual(seen, [`Basic ${Buffer.from("name@example.test:p@ss").toString("base64")}`]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("recognises pending, failed, and completed Standard task responses", () => {
   assert.deepEqual(
     readTaskState({ tasks: [{ status_code: 40602, status_message: "Task In Queue", result: null }] }, 200),

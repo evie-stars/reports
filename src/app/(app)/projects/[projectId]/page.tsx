@@ -15,6 +15,7 @@ import { TestingTools } from "@/components/project/testing-tools";
 import { KeywordTable, LocationTable } from "@/components/project/tracking-tables";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
+import { secretStatus } from "@/lib/app-secrets";
 import { prisma } from "@/lib/db";
 import { canManageReports, currentActor } from "@/lib/access";
 import { GA4_READONLY_SCOPE, listAnalyticsProperties } from "@/lib/google-analytics";
@@ -77,7 +78,7 @@ export default async function ProjectDetailPage({
   if (!canManageReports(actor.role)) redirect(`/clients/${project.clientId}`);
 
   const isAdmin = actor.role === "admin";
-  const googleConfigured = googleIntegrationsConfigured();
+  const googleConfigured = await googleIntegrationsConfigured();
   const connections = googleConfigured ? await prisma.googleConnection.findMany({
     orderBy: { accountEmail: "asc" },
     select: { id: true, accountEmail: true, encryptedRefreshToken: true, grantedScopes: true }
@@ -95,7 +96,7 @@ export default async function ProjectDetailPage({
   const activeLocations = project.locations.filter((location) => location.active);
   const keywordChoices = activeKeywords.map((keyword) => ({ id: keyword.id, label: keyword.phrase }));
   const locationChoices = activeLocations.map((location) => ({ id: location.id, label: location.name }));
-  const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const credentialsConfigured = (await secretStatus("dataforseo")).configured;
   const liveEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const metricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
 

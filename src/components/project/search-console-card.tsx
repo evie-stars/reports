@@ -111,8 +111,8 @@ export function SearchConsoleCard({
       ) : null}
 
       {!configured ? (
-        <EmptyState icon="alert-circle" title="Google integrations are not configured" compact>
-          The Google OAuth environment variables are missing from the server.
+        <EmptyState icon="alert-circle" title="Google integrations are not set up" compact>
+          An administrator needs to finish the Google setup in Settings: the client credentials, the redirect URI and the encryption key.
         </EmptyState>
       ) : connectionCount === 0 ? (
         <EmptyState
