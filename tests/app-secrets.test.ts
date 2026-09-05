@@ -103,6 +103,13 @@ test("form values are trimmed and rejected when empty, oversized, or containing 
   assert.throws(() => validateSecretValues("dataforseo", { login: "name@example.test", password: "bad\u001fvalue" }), /invalid characters/);
   assert.throws(() => validateSecretValues("dataforseo", { login: "a\nb@x.y", password: "secret" }), /invalid characters/);
   assert.throws(() => validateSecretValues("google-integrations", { clientId: 12, clientSecret: "x" }), /Enter the OAuth client ID/);
+  assert.deepEqual(
+    validateSecretValues("smtp", { host: "mail.example.test", port: " 587 ", user: "reports@example.test", password: "pw" }),
+    { host: "mail.example.test", port: "587", user: "reports@example.test", password: "pw" }
+  );
+  assert.throws(() => validateSecretValues("smtp", { host: "mail.example.test", port: "70000", user: "u", password: "pw" }), /between 1 and 65535/);
+  assert.throws(() => validateSecretValues("smtp", { host: "mail.example.test", port: "smtp", user: "u", password: "pw" }), /between 1 and 65535/);
+  assert.equal(SECRET_DEFINITIONS.smtp.hint({ host: "mail.example.test", port: "587", user: "u", password: "pw" }), "mail.example.test:587");
 });
 
 test("display hints reveal at most two characters, and only from a well-formed email", () => {

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { disconnectGoogleConnection } from "@/actions/integrations";
 import { Icon } from "@/components/icon";
 import { ApiKeyCard } from "@/components/settings/api-key-card";
+import { NotificationsCard } from "@/components/settings/notifications-card";
 import { SubmitButton } from "@/components/submit-button";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
@@ -24,6 +25,7 @@ import {
   type GoogleIntegrationProduct,
   type GoogleIntegrationsSetup
 } from "@/lib/google-oauth";
+import { notificationStatus } from "@/lib/notifications";
 import { MASTER_KEY_ENV, masterEncryptionKeyConfigured, readPreviousEncryptionKey } from "@/lib/secret-crypto";
 import { workerHealth } from "@/lib/worker-health";
 
@@ -46,9 +48,11 @@ export default async function SettingsPage({ searchParams }: {
     secret?: string;
     secretName?: string;
     secretError?: string;
+    notify?: string;
+    notifyError?: string;
   }>;
 }) {
-  const { google, googleWarning, googleError, secret, secretName, secretError } = await searchParams;
+  const { google, googleWarning, googleError, secret, secretName, secretError, notify, notifyError } = await searchParams;
   const actor = await currentActor();
   if (actor.role !== "admin") redirect("/");
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
@@ -57,9 +61,10 @@ export default async function SettingsPage({ searchParams }: {
   const maxStandardTasks = process.env.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN ?? "1000";
   const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   const authEnabled = process.env.AUTH_ENABLED === "true";
-  const [googleSetup, secrets, { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
+  const [googleSetup, secrets, notifications, { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
     googleIntegrationsSetup(),
     allSecretStatuses(),
+    notificationStatus(),
     getSettingsData()
   ]);
   const googleConfigured = googleSetup.configured;
@@ -106,6 +111,8 @@ export default async function SettingsPage({ searchParams }: {
       {secret === "rolled-back" ? <Notice tone="success" title={`Previous ${secretLabel} credentials restored.`}>Run a test to confirm they still work.</Notice> : null}
       {secret === "removed" ? <Notice tone="success" title={`${secretLabel} credentials removed from the app.`}>The server environment value is used now, if one is set.</Notice> : null}
       {secretError ? <Notice tone="danger" title={`${secretLabel} credentials were not changed.`} role="alert">{secretError}</Notice> : null}
+      {notify === "sent" ? <Notice tone="success" title="Test email sent.">Check the inbox for {actor.email}.</Notice> : null}
+      {notifyError ? <Notice tone="danger" title="Test email was not sent." role="alert">{notifyError}</Notice> : null}
       {previousKeyConfigured ? (
         <Notice tone="warn" title="A previous master key is still configured.">
           Stored values still open with it for now. Run <code className="font-mono text-xs">npm run secrets:rekey</code>, then remove APP_SECRETS_PREVIOUS_ENCRYPTION_KEY and the legacy GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY.
@@ -191,6 +198,8 @@ export default async function SettingsPage({ searchParams }: {
             <SettingRow label="Rate limits"><StatusPill tone="accent">Enabled</StatusPill></SettingRow>
           </dl>
         </SectionCard>
+
+        <NotificationsCard status={notifications} actorEmail={actor.email} />
 
         <SectionCard title="Operations" subtitle="Rank worker health" icon="refresh">
           <dl className="divide-y divide-line text-sm">

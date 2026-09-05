@@ -1,6 +1,7 @@
 import { processRankQueue } from "../src/lib/rank-queue";
 import { processKeywordMetricsQueue } from "../src/lib/keyword-metrics";
 import { writeAuditLog } from "../src/lib/audit";
+import { notificationSettings } from "../src/lib/notifications";
 import { recordWorkerFailure, recordWorkerStart, recordWorkerSuccess } from "../src/lib/worker-health";
 import { enqueueDueReportExecutions, processScheduledReportExecutions } from "../src/lib/scheduled-report-worker";
 
@@ -16,7 +17,9 @@ async function main() {
       submitted: result.processed,
       collected: result.collected ?? 0,
       metricsSubmitted: metrics.submitted,
-      metricsCollected: metrics.collected
+      metricsCollected: metrics.collected,
+      // Recorded so Settings can show when the worker's .env disagrees with the app's environment.
+      notificationsEnabled: notificationSettings().enabled
     });
     await writeAuditLog({
       event: "worker.completed",
