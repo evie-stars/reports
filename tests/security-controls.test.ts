@@ -5,6 +5,8 @@ import {
   apiRateLimit,
   configuredPositiveInteger,
   gscImportRateLimit,
+  notificationSendRateLimit,
+  notificationTestRateLimit,
   paidRunRateLimit,
   secretChangeRateLimit,
   shareRateLimit,
@@ -20,6 +22,8 @@ test("uses conservative default rate-limit policies", () => {
   assert.deepEqual(apiRateLimit(), { limit: 60, windowSeconds: 60 });
   assert.deepEqual(secretChangeRateLimit(), { limit: 10, windowSeconds: 3600 });
   assert.deepEqual(shareViewRateLimit(), { limit: 60, windowSeconds: 60 });
+  assert.deepEqual(notificationTestRateLimit(), { limit: 5, windowSeconds: 3600 });
+  assert.deepEqual(notificationSendRateLimit(), { limit: 20, windowSeconds: 3600 });
 });
 
 test("rejects missing and invalid positive integer configuration", () => {

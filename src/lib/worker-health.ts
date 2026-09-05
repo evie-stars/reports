@@ -18,6 +18,7 @@ export async function recordWorkerSuccess(input: {
   collected: number;
   metricsSubmitted: number;
   metricsCollected: number;
+  notificationsEnabled: boolean;
 }) {
   const now = new Date();
   await prisma.workerHeartbeat.upsert({

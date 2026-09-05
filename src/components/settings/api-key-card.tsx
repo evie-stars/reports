@@ -35,10 +35,8 @@ export function ApiKeyCard({
     ? "The server environment holds different credentials, which will be used instead."
     : summary.environmentConfigured
       ? "The same credentials in the server environment will be used instead."
-      : "No server environment value is set, so requests to this provider will fail until a key is added.";
-  const rollbackWarning = isGoogle
-    ? " If the client ID differs, every connected Google account would have to reconnect, so the rollback is refused while accounts are connected."
-    : " If the previous version is a different account, paid tasks submitted under the current one could not be collected, so the rollback is refused while any are pending.";
+      : definition.removeConsequence ?? "No server environment value is set, so requests to this provider will fail until a key is added.";
+  const rollbackWarning = definition.rollbackWarning ? ` ${definition.rollbackWarning}` : "";
   const blocked = summary.locked || summary.unavailable || Boolean(disabledReason);
 
   return (
@@ -139,6 +137,7 @@ export function ApiKeyCard({
                   <input
                     autoComplete="new-password"
                     className="field"
+                    inputMode={field.inputMode}
                     name={field.key}
                     placeholder={field.placeholder}
                     required

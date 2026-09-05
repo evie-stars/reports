@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { fetchWithTimeout, readJsonResponse } from "@/lib/http";
 import { importLockHeld } from "@/lib/import-lock";
 import { decryptSecret, encryptSecret, fingerprintSecret, MASTER_KEY_ENV } from "@/lib/secret-crypto";
+import { smtpSettingsFromValues, validateSmtpPort, verifySmtpSettings } from "@/lib/smtp";
 import { isBootstrapAdmin } from "@/lib/user-access";
 import type { AppRole } from "@/lib/roles";
 
@@ -12,7 +13,7 @@ import type { AppRole } from "@/lib/roles";
  * see a fingerprint and a non-secret display hint.
  */
 
-export const SECRET_NAMES = ["dataforseo", "google-integrations"] as const;
+export const SECRET_NAMES = ["dataforseo", "google-integrations", "smtp"] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 
 export type SecretField = {
@@ -22,6 +23,9 @@ export type SecretField = {
   secret: boolean;
   envName: string;
   placeholder?: string;
+  inputMode?: "numeric";
+  /** Extra shape check for one field; returns an error message or null. */
+  validate?: (value: string) => string | null;
 };
 
 export type SecretDefinition = {
@@ -32,6 +36,10 @@ export type SecretDefinition = {
   /** The field that identifies the account or client; changing it has consequences beyond the credential itself. */
   identityField: string;
   hint: (values: SecretValues) => string;
+  /** Appended to the roll-back confirmation. */
+  rollbackWarning?: string;
+  /** Shown in the remove confirmation when no server environment value exists. */
+  removeConsequence?: string;
 };
 
 export type SecretValues = Record<string, string>;
@@ -94,7 +102,9 @@ export const SECRET_DEFINITIONS: Record<SecretName, SecretDefinition> = {
       { key: "password", label: "API password", secret: true, envName: "DATAFORSEO_PASSWORD" }
     ],
     identityField: "login",
-    hint: (values) => maskIdentifier(values.login)
+    hint: (values) => maskIdentifier(values.login),
+    rollbackWarning: "If the previous version is a different account, paid tasks submitted under the current one could not be collected, so the rollback is refused while any are pending.",
+    removeConsequence: "No server environment value is set, so rank checks will fail until a key is added."
   },
   "google-integrations": {
     name: "google-integrations",
@@ -105,7 +115,24 @@ export const SECRET_DEFINITIONS: Record<SecretName, SecretDefinition> = {
       { key: "clientSecret", label: "OAuth client secret", secret: true, envName: "GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET" }
     ],
     identityField: "clientId",
-    hint: (values) => values.clientId
+    hint: (values) => values.clientId,
+    rollbackWarning: "If the client ID differs, every connected Google account would have to reconnect, so the rollback is refused while accounts are connected.",
+    removeConsequence: "No server environment value is set, so Search Console and Analytics imports will fail until a client is added."
+  },
+  smtp: {
+    name: "smtp",
+    label: "Outgoing email (SMTP)",
+    description: "Mailbox used for notification emails. Use an authenticated mailbox on port 587 (STARTTLS) or 465 (TLS); the password is only ever sent over TLS.",
+    fields: [
+      { key: "host", label: "SMTP host", secret: false, envName: "SMTP_HOST", placeholder: "mail.example.co.uk" },
+      { key: "port", label: "SMTP port", secret: false, envName: "SMTP_PORT", placeholder: "587", inputMode: "numeric", validate: validateSmtpPort },
+      { key: "user", label: "Mailbox username", secret: false, envName: "SMTP_USER", placeholder: "reports@example.co.uk" },
+      { key: "password", label: "Mailbox password", secret: true, envName: "SMTP_PASSWORD" }
+    ],
+    identityField: "host",
+    hint: (values) => `${values.host}:${values.port}`,
+    rollbackWarning: "Notifications will use the restored mailbox from the next email.",
+    removeConsequence: "No server environment value is set, so notification emails stop until a mailbox is added."
   }
 };
 
@@ -319,6 +346,8 @@ export function validateSecretValues(name: SecretName, input: Record<string, unk
     if (!value) throw new Error(`Enter the ${field.label}.`);
     if (value.length > 512) throw new Error(`The ${field.label} is too long.`);
     if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error(`The ${field.label} contains invalid characters.`);
+    const fieldError = field.validate?.(value);
+    if (fieldError) throw new Error(fieldError);
     values[field.key] = value;
   }
   return values;
@@ -425,6 +454,7 @@ export async function recordVerification(name: SecretName, result: VerificationR
 
 export async function verifySecretValues(name: SecretName, values: SecretValues): Promise<VerificationResult> {
   if (name === "dataforseo") return verifyDataForSeoCredentials(values.login, values.password);
+  if (name === "smtp") return verifySmtpSettings(smtpSettingsFromValues(values));
   return verifyGoogleClientCredentials(values.clientId, values.clientSecret);
 }
 
@@ -575,11 +605,12 @@ function readStoredValues(definition: SecretDefinition, encryptedValue: string, 
   }
 }
 
+/** Environment values count only when complete and well-formed; an invalid SMTP_PORT is "missing", not "configured". */
 function environmentValues(definition: SecretDefinition, env: Record<string, string | undefined>): SecretValues | null {
   const values: SecretValues = {};
   for (const field of definition.fields) {
     const value = env[field.envName]?.trim();
-    if (!value) return null;
+    if (!value || field.validate?.(value)) return null;
     values[field.key] = value;
   }
   return values;

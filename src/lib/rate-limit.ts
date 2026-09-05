@@ -105,6 +105,16 @@ export function secretChangeRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_SECRET_CHANGES_PER_HOUR", 10), windowSeconds: 60 * 60 };
 }
 
+/** Outbound emails of one kind across the whole app; the backstop against any flood reaching the mailbox quota. */
+export function notificationSendRateLimit(): RateLimitPolicy {
+  return { limit: configuredPositiveInteger("RATE_LIMIT_NOTIFICATIONS_PER_HOUR", 20), windowSeconds: 60 * 60 };
+}
+
+/** "Send test email" opens a real SMTP session each time, so it gets a small bucket of its own. */
+export function notificationTestRateLimit(): RateLimitPolicy {
+  return { limit: configuredPositiveInteger("RATE_LIMIT_NOTIFICATION_TESTS_PER_HOUR", 5), windowSeconds: 60 * 60 };
+}
+
 export function apiRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_API_REQUESTS_PER_MINUTE", 60), windowSeconds: 60 };
 }

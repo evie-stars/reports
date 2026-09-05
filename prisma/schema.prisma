@@ -479,19 +479,21 @@ model RateLimitBucket {
 }
 
 model WorkerHeartbeat {
-  key              String    @id
-  status           String    @default("never")
-  startedAt        DateTime?
-  completedAt      DateTime?
-  lastSuccessAt    DateTime?
-  lastFailureAt    DateTime?
-  scheduled        Int       @default(0)
-  submitted        Int       @default(0)
-  collected        Int       @default(0)
-  metricsSubmitted Int       @default(0)
-  metricsCollected Int       @default(0)
-  message          String?
-  updatedAt        DateTime  @updatedAt
+  key                  String    @id
+  status               String    @default("never")
+  startedAt            DateTime?
+  completedAt          DateTime?
+  lastSuccessAt        DateTime?
+  lastFailureAt        DateTime?
+  scheduled            Int       @default(0)
+  submitted            Int       @default(0)
+  collected            Int       @default(0)
+  metricsSubmitted     Int       @default(0)
+  metricsCollected     Int       @default(0)
+  /// Whether the worker's own environment had NOTIFICATIONS_ENABLED on its last run; the app and the worker read different env files.
+  notificationsEnabled Boolean   @default(false)
+  message              String?
+  updatedAt            DateTime  @updatedAt
 }
 
 model RankResult {

@@ -58,7 +58,7 @@ Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one
 
 - **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls. Changing API keys is reserved for the administrators listed in `AUTH_ADMIN_EMAILS`.
 - **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console and Analytics property mapping.
-- **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
+- **Team:** read-only reports, guarded report reruns, schedules, and report requests (which can email administrators, see Email Notifications). Cost and monetary data is not rendered for this role.
 
 The dashboard access panel records successful users automatically, supports direct invitations by verified Google email, applies role changes on the next authenticated request, and keeps environment administrators protected as emergency recovery accounts.
 
@@ -100,6 +100,16 @@ The DataForSEO login and password and the Google integrations client ID and secr
 4. Remove `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` and the legacy variable, then restart again.
 
 Existing deployments need no change to keep working: the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` is read whenever the new name is empty. Do not generate a fresh `APP_SECRETS_ENCRYPTION_KEY` on a deployment that already has connected Google accounts without following the rotation steps above.
+
+## Email Notifications
+
+Administrators can be emailed when a team member submits a report request, and once per worker run when scheduled monthly reports finish failed, partial, or blocked (one digest listing every report that needs attention, with a link to each report's settings and rank run). Completed runs do not email. Nothing is sent until three things are in place:
+
+1. `NOTIFICATIONS_ENABLED="true"` and a `NOTIFICATIONS_FROM` address (for example `Star Reports <reports@starwebsites.co.uk>`). The app reads the Plesk environment and the worker reads `.env`, so set both there and in `.env`; the Settings card shows what the worker saw on its last run and warns when the two disagree.
+2. An authenticated mailbox, saved under **Settings → API keys → Outgoing email (SMTP)** or set with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. Use a Plesk mailbox on port 587 (STARTTLS) or 465 (TLS); plain connections are refused so the password is never sent in the clear, and an unauthenticated port-25 relay is not supported. Use the host name shown on the Plesk mail certificate, and make `NOTIFICATIONS_FROM` the mailbox's own address (a display name is fine), because most servers refuse to send as anyone else. Saving the mailbox checks the login with the mail server first: a refused password, an unknown host, a closed port, or a certificate mismatch is rejected outright, while a timeout is saved with a warning.
+3. Recipients: every enabled administrator who has signed in, or the comma-separated `NOTIFICATION_EMAILS` list when set. Keep that list to staff mailboxes, because the emails name clients, quote requester notes, and include error text.
+
+The Settings page shows the notification status and a **Send test email** button, which emails only the signed-in administrator, works even while sending is disabled, and is limited to `RATE_LIMIT_NOTIFICATION_TESTS_PER_HOUR`. A saved mailbox proves the login; the test email proves delivery, including that the From address is accepted. Report-request emails are capped at three per hour per requester, and every kind of notification at `RATE_LIMIT_NOTIFICATIONS_PER_HOUR` across the app (the request itself is always stored; a skipped email is audited). Every send, skip, or failure is recorded in the audit trail with only a summary of the reason, never the server's response text, and a delivery problem never blocks the request or the worker. Repeated failed mailbox checks count as failed logins on the mail server, so a Plesk fail2ban rule may briefly block the app server's own address; whitelist it there if that happens.
 
 ## Google Search Console
 
