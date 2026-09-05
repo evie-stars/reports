@@ -28,7 +28,7 @@
     "nodemailer": "^8.0.11",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "zod": "^3.25.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
