@@ -13,8 +13,9 @@ coverage
 # Dependencies
 node_modules
 
-# Local databases
+# Local databases and backup archives
 prisma/dev.db
+backups/
 
 # Editor, agent and OS files
 .claude/launch.json

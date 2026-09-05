@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 
 /**
  * AES-256-GCM at rest for everything the app must keep secret: Google refresh tokens and the API
@@ -106,4 +106,28 @@ function parseMasterKey(value: string | undefined) {
     throw new Error(`${MASTER_KEY_ENV} must be a 64-character hexadecimal value (generate one with: openssl rand -hex 32).`);
   }
   return Buffer.from(value, "hex");
+}
+
+/**
+ * Whether a stored value opens with the given key (or, with none given, the current key and then
+ * the previous one). The plaintext never leaves this function, so backup verification can prove
+ * a key matches without a credential ever reaching a log or a message.
+ */
+export function canDecryptSecret(value: string, keyValue?: string) {
+  try {
+    decryptSecret(value, keyValue);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A short public identity for a master key, recorded beside each backup so a restore can tell
+ * whether this server holds the key the archive's stored values were encrypted under. It is a plain
+ * digest of a 32-byte random key: it cannot be reversed and reveals nothing about the key.
+ */
+export function masterKeyFingerprint(keyValue: string | undefined) {
+  if (!isValidMasterKey(keyValue)) return null;
+  return createHash("sha256").update(parseMasterKey(keyValue)).digest("hex").slice(0, 12);
 }

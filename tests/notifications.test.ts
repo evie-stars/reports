@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  backupHealthMessage,
   escapeHtml,
   isEmailAddress,
   notificationSettings,
@@ -186,4 +187,31 @@ test("SMTP settings validate the port and classify errors without copying server
   assert.deepEqual([timeout.ok, timeout.indeterminate], [false, true]);
   const unknown = interpretSmtpError(null, at);
   assert.deepEqual([unknown.ok, unknown.indeterminate], [false, true]);
+});
+
+test("the backup alert says whether the last run failed or backups simply stopped, and quotes the recorded reason", () => {
+  const failed = backupHealthMessage({
+    health: { state: "failed", label: "Failed", healthy: false },
+    heartbeat: { lastSuccessAt: new Date("2026-09-01T02:00:00.000Z"), lastFailureAt: new Date("2026-09-05T02:00:00.000Z"), message: "pg_dump exited with code 1: <no space left>" },
+    appUrl: "https://reports.example.test/settings"
+  });
+  assert.equal(failed.subject, "Star Reports: the database backup failed");
+  assert.match(failed.text, /The last database backup failed\. The last successful backup was 1 September 2026/);
+  assert.match(failed.text, /Reason: pg_dump exited with code 1: <no space left>/);
+  assert.match(failed.text, /Settings: https:\/\/reports\.example\.test\/settings/);
+  assert.match(failed.html, /&lt;no space left&gt;/);
+
+  const unfinished = backupHealthMessage({ health: { state: "failed", label: "Did not finish", healthy: false }, heartbeat: null, appUrl: null });
+  assert.match(unfinished.text, /did not finish\. The last successful backup was never\./);
+  assert.doesNotMatch(unfinished.text, /Reason:/);
+
+  const stale = backupHealthMessage({
+    health: { state: "stale", label: "Stale", healthy: false },
+    heartbeat: { lastSuccessAt: new Date("2026-08-30T02:00:00.000Z"), lastFailureAt: null, message: "star-reports-20260830-020000.dump · 12.4 MB · 23 tables · restore tested" },
+    appUrl: null
+  });
+  assert.equal(stale.subject, "Star Reports: database backups are stale");
+  assert.match(stale.text, /No database backup has succeeded since 30 August 2026/);
+  assert.doesNotMatch(stale.text, /Reason:/, "a stale backup's last message describes a success, not a failure");
+  assert.doesNotMatch(stale.text, /https?:\/\//);
 });

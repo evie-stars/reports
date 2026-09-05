@@ -12,6 +12,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
 import { allSecretStatuses, canManageSecrets, isSecretName, SECRET_DEFINITIONS, secretStoreLocked } from "@/lib/app-secrets";
+import { BACKUP_HEARTBEAT_KEY, BACKUP_STALE_HOURS_ENV, backupHealth, DEFAULT_BACKUP_STALE_HOURS } from "@/lib/backups";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { formatDate, formatDateTime, formatUsd, plural, readableAuditEvent, readableValue, type Tone } from "@/lib/format";
@@ -61,7 +62,7 @@ export default async function SettingsPage({ searchParams }: {
   const maxStandardTasks = process.env.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN ?? "1000";
   const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
   const authEnabled = process.env.AUTH_ENABLED === "true";
-  const [googleSetup, secrets, notifications, { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
+  const [googleSetup, secrets, notifications, { budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
     googleIntegrationsSetup(),
     allSecretStatuses(),
     notificationStatus(),
@@ -78,6 +79,7 @@ export default async function SettingsPage({ searchParams }: {
   const previousKeyConfigured = Boolean(readPreviousEncryptionKey());
   const secretLabel = isSecretName(secretName) ? SECRET_DEFINITIONS[secretName].label : "API key";
   const worker = workerHealth(heartbeat);
+  const backups = backupHealth(backupHeartbeat);
   const allowedAccessConfigured = managedUsers > 0 || Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
   const gscConnections = connections.filter((connection) => connectionHasScope(connection, GSC_READONLY_SCOPE));
   const ga4Connections = connections.filter((connection) => connectionHasScope(connection, GA4_READONLY_SCOPE));
@@ -201,7 +203,7 @@ export default async function SettingsPage({ searchParams }: {
 
         <NotificationsCard status={notifications} actorEmail={actor.email} />
 
-        <SectionCard title="Operations" subtitle="Rank worker health" icon="refresh">
+        <SectionCard title="Operations" subtitle="Rank worker and database backups" icon="refresh">
           <dl className="divide-y divide-line text-sm">
             <SettingRow label="Rank worker">
               <StatusPill tone={worker.healthy ? "accent" : "blocked"}>{worker.label}</StatusPill>
@@ -213,6 +215,30 @@ export default async function SettingsPage({ searchParams }: {
             </SettingRow>
             <SettingRow label="Last worker result">
               {heartbeat ? `${heartbeat.submitted} submitted, ${heartbeat.collected} collected` : "Not recorded"}
+            </SettingRow>
+            <SettingRow label="Database backup">
+              <StatusPill tone={backups.healthy ? "accent" : backups.state === "never" ? "warn" : "blocked"}>{backups.label}</StatusPill>
+              {backups.state === "never" ? (
+                <span className="block text-xs text-slate mt-1">Add the daily <code className="font-mono">npm run db:backup</code> task in Plesk (README, “Database Backups”).</span>
+              ) : null}
+              {backups.state === "stale" ? <span className="block text-xs text-warn mt-1">No successful backup within the last {process.env[BACKUP_STALE_HOURS_ENV] || DEFAULT_BACKUP_STALE_HOURS} hours. Check the Plesk scheduled task.</span> : null}
+              {backups.label === "Did not finish" && backupHeartbeat?.startedAt ? <span className="block text-xs text-blocked mt-1">The run started {formatDateTime(backupHeartbeat.startedAt)} never recorded a result. Check the Plesk task output and the server log.</span> : null}
+            </SettingRow>
+            <SettingRow label="Last backup">
+              {backupHeartbeat?.lastSuccessAt ? (
+                <>
+                  <span>{formatDateTime(backupHeartbeat.lastSuccessAt)}</span>
+                  {backupHeartbeat.status === "healthy" && backupHeartbeat.message ? <span className="block text-xs text-slate mt-1 break-words">{backupHeartbeat.message}</span> : null}
+                </>
+              ) : "Not recorded"}
+            </SettingRow>
+            <SettingRow label="Last backup failure">
+              {backupHeartbeat?.lastFailureAt ? (
+                <>
+                  <span>{formatDateTime(backupHeartbeat.lastFailureAt)}</span>
+                  {backupHeartbeat.status === "failed" && backupHeartbeat.message ? <span className="block text-xs text-blocked mt-1 break-words">{backupHeartbeat.message}</span> : null}
+                </>
+              ) : "None recorded"}
             </SettingRow>
           </dl>
         </SectionCard>
@@ -371,9 +397,10 @@ function connectHref(product: GoogleIntegrationProduct) {
 async function getSettingsData() {
   try {
     const weekAgo = sevenDaysAgo();
-    const [budget, heartbeat, failedRuns, auditLogs, connections, managedUsers] = await Promise.all([
+    const [budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers] = await Promise.all([
       getDataForSeoBudgetSummary(),
       prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
+      prisma.workerHeartbeat.findUnique({ where: { key: BACKUP_HEARTBEAT_KEY } }),
       prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
       prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
       prisma.googleConnection.findMany({
@@ -382,11 +409,12 @@ async function getSettingsData() {
       }),
       prisma.userAccess.count({ where: { enabled: true } })
     ]);
-    return { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable: false };
+    return { budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable: false };
   } catch {
     return {
       budget: { limitUsd: 0, spentUsd: 0, reservedUsd: 0, availableUsd: 0 },
       heartbeat: null,
+      backupHeartbeat: null,
       failedRuns: 0,
       auditLogs: [],
       connections: [] as GoogleConnectionRow[],
