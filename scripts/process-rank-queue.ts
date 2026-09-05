@@ -29,6 +29,7 @@ async function main() {
     console.log(
       `Rank worker: ${scheduled} scheduled, ${result.processed} submitted, ${result.collected ?? 0} results collected; ` +
       `${reports.gscImported} GSC imported, ${reports.gscFailed} GSC failed; ` +
+      `${reports.ga4Imported} GA4 imported, ${reports.ga4Failed} GA4 failed; ` +
       `${metrics.submitted} keyword metrics submitted, ${metrics.collected} collected` +
       `${result.locked ? "; another worker owns the lock" : ""}.`
     );

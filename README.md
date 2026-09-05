@@ -9,7 +9,7 @@ Local SEO reporting hub for month-to-month rank tracking, built to run on a Ples
 - Default to DataForSEO Sandbox so setup and parser work does not spend trial credit.
 - Queue guarded live checks, ad hoc reports, and monthly schedules.
 - Restrict the reporting workspace with approved Google accounts and admin, manager, and team roles.
-- Import mapped Google Search Console data and retain the foundation for GA4.
+- Import mapped Google Search Console and Google Analytics 4 data for each report.
 
 ## Sandbox Rank Checks
 
@@ -36,9 +36,9 @@ The worker uses a database lock so only one worker processes reports at a time, 
 
 Each Standard task carries a unique `tag`, and DataForSEO's `task_post` response is matched back to our tasks by that tag rather than by array position, so a reordered or partially rejected batch cannot file one keyword's rankings against another. Every outbound request has a timeout (`HTTP_TIMEOUT_MS`, and `DATAFORSEO_TIMEOUT_MS` for the slower SERP endpoints); reads are retried with backoff, but nothing that creates a paid task is ever retried automatically. On each run the worker also reaps tasks left in `submitting` for longer than `RANK_TASK_STALE_MINUTES` (a crash between posting and recording the answer) and resumes runs whose tasks were created but never posted. Retrying a failed Standard report re-queues only its failed tasks on the same run, reserving budget for just that remainder, so tasks DataForSEO already accepted are never paid for twice. Team users cannot queue another full report within `RANK_TEAM_COOLDOWN_DAYS` of the latest completed scheduled or ad hoc report; managers and administrators can override that cooldown.
 
-The Scheduled workspace lists every enabled monthly report, its next run date, coverage, search depth, devices, enabled data, and latest execution outcome. SEO, Maps, and Search Console can be toggled independently. The client report keeps them under one project but separates Overview, SEO, and Maps into focused views. GA4 appears as a planned module until that integration is connected.
+The Scheduled workspace lists every enabled monthly report, its next run date, coverage, search depth, devices, enabled data, and latest execution outcome. SEO, Maps, Search Console, and Analytics can be toggled independently. The client report keeps them under one project but separates Overview, SEO, and Maps into focused views; the Search Console and Analytics cards appear on the Overview and SEO views.
 
-A schedule day later than the current month's last day runs on that last day instead of being skipped. Each due schedule creates one coordinated execution record. The worker queues the selected SEO and Maps checks, refreshes a mapped Search Console property, and records each source separately. A report can therefore finish as partially successful without hiding the data that completed. In-app dashboard alerts surface failed, blocked, and partial executions to administrators. Existing scheduled rank runs from the current month are attached rather than submitted again.
+A schedule day later than the current month's last day runs on that last day instead of being skipped. Each due schedule creates one coordinated execution record. The worker queues the selected SEO and Maps checks, refreshes the mapped Search Console and Google Analytics properties, and records each source separately. An imported source that is left `running` by a worker that died is retried once its import lock expires, and a scheduled import that collides with a manual one is put back to `queued` for the next run rather than failed. A report can therefore finish as partially successful without hiding the data that completed. In-app dashboard alerts surface failed, blocked, and partial executions to administrators. Existing scheduled rank runs from the current month are attached rather than submitted again.
 
 ## Keyword Demand
 
@@ -57,7 +57,7 @@ https://reports.starwebsites.co.uk/api/auth/callback/google
 Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. When the user table is unavailable, sign-ins fail closed rather than falling back to the domain allowlist. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
 - **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
-- **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console property mapping.
+- **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console and Analytics property mapping.
 - **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
 
 The dashboard access panel records successful users automatically, supports direct invitations by verified Google email, applies role changes on the next authenticated request, and keeps environment administrators protected as emergency recovery accounts.
@@ -77,14 +77,14 @@ The dashboard access panel records successful users automatically, supports dire
 Complete these infrastructure-level items as the reporting integrations expand:
 
 1. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
-2. Complete a focused application and infrastructure security review before importing broader GA4 datasets.
+2. Complete a focused application and infrastructure security review before importing broader analytics datasets, such as landing-page or event-level GA4 data.
 3. Rate limit and audit the read-only `/share/*` pages, which are reachable without a Google account.
 
 ## Google Search Console
 
-Search Console connects through a separate read-only Google OAuth client and lets an administrator map one verified property to each report. Access tokens are generated only when needed; the long-lived refresh token is encrypted at rest with AES-256-GCM.
+Search Console and Google Analytics 4 share one read-only Google OAuth client, separate from the sign-in client. An administrator connects a Google account from Settings, granting each product's scope separately (Google's incremental authorisation folds an earlier grant into the new token), and a manager maps one verified property to each report. Access tokens are generated only when needed; the long-lived refresh token is encrypted at rest with AES-256-GCM. The stored scope list always mirrors the latest token response, so if a grant is revoked at Google and the account is reconnected, Settings warns that the missing product needs to be granted again.
 
-Create a separate Google OAuth web client with this production redirect URI:
+Create a Google OAuth web client with this production redirect URI, and enable the Search Console API, the Google Analytics Data API, and the Google Analytics Admin API in its Google Cloud project:
 
 ```text
 https://reports.starwebsites.co.uk/api/integrations/google/callback
@@ -101,9 +101,17 @@ GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY
 
 Generate the encryption key once with `openssl rand -hex 32`, store it with the application secrets, and include it in database-backup recovery documentation. Changing or losing this key makes existing connected-account tokens unreadable.
 
-After deployment, open **Settings**, connect the Google account, then open a report's settings and select its Search Console property. The integration requests only `webmasters.readonly` access. Disconnecting in Report Hub removes the locally stored token and report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
+After deployment, open **Settings**, connect the Google account for Search Console, then open a report's settings and select its Search Console property. The Search Console grant requests only `webmasters.readonly` access. Disconnecting an account in Report Hub removes the locally stored token together with its Search Console and Analytics report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
 Mapped reports can manually import the previous 90 complete days of final Web search totals. Enabled monthly schedules refresh the same data automatically. One daily aggregate is stored per report with clicks, impressions, CTR, and average position. Re-running the import replaces that same date range, so refreshes are idempotent rather than additive. The client report displays the totals and a clicks/impressions trend using the same period and project filters as the ranking report. Each Google request is also recorded in the API audit with a zero cost. Manual imports are limited by `RATE_LIMIT_GSC_IMPORTS_PER_HOUR`; scheduled worker invocations process at most `SCHEDULED_REPORT_MAX_GSC_IMPORTS` imports at once.
+
+## Google Analytics 4
+
+Analytics uses the same Google OAuth client as Search Console. From **Settings**, grant Analytics access to a connected Google account (or connect a new one); this requests only `analytics.readonly`. A manager then opens a report's settings and selects one GA4 property from the accounts that hold Analytics access. Property names are read from the Analytics Admin API and every stored property reference is validated against the `properties/<id>` resource format before it is used in a request.
+
+Each import replaces the previous 90 complete days, ending yesterday to match Search Console. Two Data API reports are stored per property: whole-property daily totals and the same metrics split by default channel group. The metrics are sessions, active users, new users, engaged sessions, and key events (GA4's name for conversions). Because active users is a distinct count for each day, it is only ever shown per day; period totals and the channel table use the additive metrics. GA4 can still be finalising the most recent day at import time, and the next refresh replaces the whole range, so trailing days self-correct. Manual imports are limited by `RATE_LIMIT_GA4_IMPORTS_PER_HOUR`; scheduled worker invocations process at most `SCHEDULED_REPORT_MAX_GA4_IMPORTS` imports at once. Each Data API report request is recorded in the API audit with a zero cost; property listings and token refreshes are not.
+
+The client report shows sessions (with the organic-search share), new users, engagement rate, and key events, a sessions and daily-active-users trend, and a channel breakdown. Analytics can be included in one-off snapshots once a mapped report has imported data.
 
 ## Design System
 
@@ -141,7 +149,7 @@ The workspace shares its design language with Team Hub: Tailwind CSS v3 with the
 
 ## Upgrading An Existing Database
 
-The schema enforces one keyword phrase per report and one ranking result per run, keyword, area, result type and device. Before pushing the schema to a database that already holds data, run:
+The schema enforces one keyword phrase per report and one ranking result per run, keyword, area, result type and device. The Analytics release also reshapes the previously unused `Ga4Snapshot` table (its `source`, `medium`, `landingPage`, `users`, and `conversions` columns are replaced), so `npm run db:push` may ask for `--accept-data-loss` on that table; nothing had ever written to it. Before pushing the schema to a database that already holds data, run:
 
 ```bash
 npm run db:check
@@ -171,7 +179,7 @@ It lists any rows that would violate those constraints and exits non-zero until 
    cd /var/www/vhosts/starwebsites.co.uk/reports.starwebsites.co.uk && npm run rank:worker
    ```
 
-The exact `cd` path must be the application root shown by Plesk. The npm worker command explicitly loads the application `.env`, matching the command that was verified on the Plesk server. The worker creates due report executions, submits or collects Standard ranking tasks, refreshes scheduled Search Console data, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
+The exact `cd` path must be the application root shown by Plesk. The npm worker command explicitly loads the application `.env`, matching the command that was verified on the Plesk server. The worker creates due report executions, submits or collects Standard ranking tasks, refreshes scheduled Search Console and Google Analytics data, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
 
 ## DataForSEO Safety
 

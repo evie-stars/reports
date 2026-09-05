@@ -21,15 +21,14 @@
 - Tag-based reconciliation of Standard task batches, request timeouts, a stuck-task reaper, and in-place retries.
 - Continuous integration running lint, type check, tests, and a production build.
 - Workspace restyled to match the Team Hub design system (Tailwind, Poppins, shared icon set).
+- Google Analytics 4 connected through the shared read-only Google client, with per-report property mapping, 90-day imports split by channel, and an Analytics card on the client report and in snapshots.
+- Scheduled reports refresh mapped Analytics properties alongside Search Console, with stranded imports retried and lock collisions re-queued.
 
 ## Next Integration Phase
 
 0. Rate limit and audit access to the read-only `/share/*` pages.
-
-
-1. Connect GA4 and make Analytics an active report module.
-2. Refresh selected GA4 modules automatically as part of scheduled reporting.
-3. Add optional email notifications for new team report requests and failed schedules.
+1. Add optional email notifications for new team report requests and failed schedules.
+2. Extend the Analytics module with landing-page and event-level breakdowns once the security review in the README is complete.
 
 
 ## Cost Presentation

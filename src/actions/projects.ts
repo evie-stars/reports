@@ -90,8 +90,7 @@ export async function updateProjectModules(projectId: string, formData: FormData
     where: { id: projectId },
     data: {
       reportModules: data.reportModules,
-      scheduleSearchTypes: scheduleSearchTypes.length > 0 ? scheduleSearchTypes : ["organic"],
-      ...(data.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc") ? {} : { scheduleEnabled: false })
+      scheduleSearchTypes: scheduleSearchTypes.length > 0 ? scheduleSearchTypes : ["organic"]
     },
     select: { clientId: true }
   });
@@ -111,15 +110,18 @@ export async function updateProjectSchedule(projectId: string, formData: FormDat
   });
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { reportModules: true, gscConnectionId: true, gscPropertyUrl: true }
+    select: { reportModules: true, gscConnectionId: true, gscPropertyUrl: true, ga4ConnectionId: true, ga4PropertyId: true }
   });
   if (!project) throw new Error("Report not found.");
   if (data.scheduleEnabled) {
-    if (!project.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc")) {
-      throw new Error("Enable SEO, Maps or Search Console before scheduling this report.");
+    if (project.reportModules.length === 0) {
+      throw new Error("Select at least one report section before scheduling this report.");
     }
     if (project.reportModules.includes("gsc") && (!project.gscConnectionId || !project.gscPropertyUrl)) {
       throw new Error("Map a Search Console property before enabling its monthly schedule.");
+    }
+    if (project.reportModules.includes("ga4") && (!project.ga4ConnectionId || !project.ga4PropertyId)) {
+      throw new Error("Map a Google Analytics property before enabling its monthly schedule.");
     }
   }
   const selectedSearchTypes = [

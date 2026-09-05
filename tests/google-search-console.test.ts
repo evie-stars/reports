@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildGoogleSearchConsoleAuthorizationUrl,
-  googleSearchConsoleAppUrl,
   GSC_READONLY_SCOPE,
   readSearchConsoleDailyRows,
   searchConsoleDateRange
 } from "../src/lib/google-search-console";
+import {
+  buildGoogleAuthorizationUrl,
+  droppedIntegrationProducts,
+  GA4_READONLY_SCOPE,
+  googleIntegrationsAppUrl,
+  isGoogleIntegrationProduct
+} from "../src/lib/google-oauth";
 import { decryptGscToken, encryptGscToken } from "../src/lib/gsc-crypto";
 import { buildGscReport } from "../src/lib/client-report";
 
@@ -28,7 +33,7 @@ test("rejects tampered Search Console refresh tokens", () => {
 });
 
 test("builds a read-only, offline Google authorization request", () => {
-  const url = buildGoogleSearchConsoleAuthorizationUrl("test-state", {
+  const url = buildGoogleAuthorizationUrl("test-state", [GSC_READONLY_SCOPE], {
     clientId: "client-id",
     clientSecret: "client-secret",
     redirectUri: "https://reports.example.test/api/integrations/google/callback"
@@ -37,13 +42,31 @@ test("builds a read-only, offline Google authorization request", () => {
   assert.equal(url.origin, "https://accounts.google.com");
   assert.equal(url.searchParams.get("access_type"), "offline");
   assert.equal(url.searchParams.get("prompt"), "consent");
+  assert.equal(url.searchParams.get("include_granted_scopes"), "true");
   assert.equal(url.searchParams.get("state"), "test-state");
   assert.equal(
     url.searchParams.get("redirect_uri"),
     "https://reports.example.test/api/integrations/google/callback"
   );
-  assert.match(url.searchParams.get("scope") ?? "", new RegExp(GSC_READONLY_SCOPE));
+  assert.equal(url.searchParams.get("scope"), `openid email ${GSC_READONLY_SCOPE}`);
   assert.doesNotMatch(url.searchParams.get("scope") ?? "", /auth\/webmasters(?:\s|$)/);
+});
+
+test("detects a product whose earlier grant is missing from a new token response", () => {
+  assert.deepEqual(droppedIntegrationProducts([GSC_READONLY_SCOPE, "openid"], ["openid", GA4_READONLY_SCOPE]), ["search-console"]);
+  assert.deepEqual(droppedIntegrationProducts([GA4_READONLY_SCOPE], [GSC_READONLY_SCOPE]), ["analytics"]);
+  // Order is stable so the first dropped product becomes the Settings warning.
+  assert.deepEqual(droppedIntegrationProducts([GSC_READONLY_SCOPE, GA4_READONLY_SCOPE], ["openid"]), ["search-console", "analytics"]);
+  assert.deepEqual(droppedIntegrationProducts([GSC_READONLY_SCOPE], [GSC_READONLY_SCOPE, GA4_READONLY_SCOPE]), []);
+  assert.deepEqual(droppedIntegrationProducts([], [GA4_READONLY_SCOPE]), []);
+});
+
+test("only the two known products are accepted from the start route and the product cookie", () => {
+  assert.equal(isGoogleIntegrationProduct("search-console"), true);
+  assert.equal(isGoogleIntegrationProduct("analytics"), true);
+  for (const value of ["constructor", "__proto__", "toString", "", "Analytics", null, undefined]) {
+    assert.equal(isGoogleIntegrationProduct(value), false, `${String(value)} must be rejected`);
+  }
 });
 
 test("builds post-OAuth redirects from the configured public callback origin", () => {
@@ -57,8 +80,8 @@ test("builds post-OAuth redirects from the configured public callback origin", (
     process.env.GOOGLE_SEARCH_CONSOLE_REDIRECT_URI = "https://reports.example.test/api/integrations/google/callback";
 
     assert.equal(
-      googleSearchConsoleAppUrl("/settings?gsc=connected").toString(),
-      "https://reports.example.test/settings?gsc=connected"
+      googleIntegrationsAppUrl("/settings?google=search-console").toString(),
+      "https://reports.example.test/settings?google=search-console"
     );
   } finally {
     restoreEnvironmentVariable("GOOGLE_SEARCH_CONSOLE_CLIENT_ID", previousClientId);

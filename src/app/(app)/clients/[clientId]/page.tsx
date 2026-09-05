@@ -90,7 +90,8 @@ export default async function ClientDetailPage({ params, searchParams }: {
     const snapshotAvailability = {
       rankings: client.projects.some((project) => project.reportModules.includes("rankings")),
       maps: client.projects.some((project) => project.reportModules.includes("maps") || project.scheduleSearchTypes.includes("maps")),
-      gsc: client.projects.some((project) => project.reportModules.includes("gsc") && Boolean(project.gscPropertyUrl) && project.gscImportedRows > 0)
+      gsc: client.projects.some((project) => project.reportModules.includes("gsc") && Boolean(project.gscPropertyUrl) && project.gscImportedRows > 0),
+      ga4: client.projects.some((project) => project.reportModules.includes("ga4") && Boolean(project.ga4PropertyId) && project.ga4ImportedRows > 0)
     };
 
     return (

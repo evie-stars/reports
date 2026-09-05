@@ -25,17 +25,16 @@ export function ScheduleForm({
     scheduleDevices: Device[];
     scheduleSearchTypes: SearchType[];
     gscPropertyUrl: string | null;
+    ga4PropertyId: string | null;
   };
   activeKeywordCount: number;
   activeLocationCount: number;
 }) {
-  const schedulable = project.reportModules.some((module) => module === "rankings" || module === "maps" || module === "gsc");
-
-  if (!schedulable) {
+  if (project.reportModules.length === 0) {
     return (
       <SectionCard id="schedule" title="Monthly schedule" subtitle="No schedulable data selected" icon="calendar">
         <EmptyState icon="calendar" title="Nothing to schedule yet" compact>
-          Enable SEO Rankings or Search Console in Report Content before scheduling reports.
+          Enable at least one data source in Report content before scheduling reports.
         </EmptyState>
       </SectionCard>
     );
@@ -106,7 +105,10 @@ export function ScheduleForm({
               ? `${scheduledSearchTypes.map((type) => type === "organic" ? "SEO" : "Maps").join(" + ")}: ${taskCount} Standard task(s), maximum estimate ${formatUsd(scheduleEstimate)}. `
               : ""}
             {project.reportModules.includes("gsc")
-              ? `Search Console: ${project.gscPropertyUrl ? "mapped and ready" : "property mapping required"}.`
+              ? `Search Console: ${project.gscPropertyUrl ? "mapped and ready" : "property mapping required"}. `
+              : ""}
+            {project.reportModules.includes("ga4")
+              ? `Analytics: ${project.ga4PropertyId ? "mapped and ready" : "property mapping required"}.`
               : ""}
           </p>
           <SubmitButton pendingLabel="Saving schedule…"><Icon name="save" className="w-3.5 h-3.5" />Save schedule</SubmitButton>

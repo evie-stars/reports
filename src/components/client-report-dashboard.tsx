@@ -71,6 +71,10 @@ export function ClientReportDashboard({
         <SearchConsolePerformance data={data.gsc} />
       ) : null}
 
+      {data.modules.ga4 && data.ga4.mapped && (!readOnly || data.ga4.trend.length > 0) ? (
+        <AnalyticsPerformance data={data.ga4} />
+      ) : null}
+
       {data.modules.rankings && !frozen ? (
         <form className="card mb-4" action={basePath} method="get">
           {filters.section !== "overview" ? <input type="hidden" name="section" value={filters.section} /> : null}
@@ -145,7 +149,7 @@ export function ClientReportDashboard({
         </SectionCard>
       ) : null}
 
-      {!data.modules.rankings && !(data.modules.gsc && data.gsc.mapped) ? (
+      {!data.modules.rankings && !(data.modules.gsc && data.gsc.mapped) && !(data.modules.ga4 && data.ga4.mapped) ? (
         <div className="card">
           <EmptyState icon="drawer" title="No reporting data is available yet">
             A manager can enable an available data source from the report settings.
@@ -340,58 +344,165 @@ function SearchConsoleChart({ points }: { points: ClientReportViewData["gsc"]["t
       </EmptyState>
     );
   }
+  return (
+    <DualSeriesChart
+      ariaLabel="Google Search Console clicks and impressions over time"
+      barLabel="Impressions"
+      lineLabel="Clicks"
+      points={points.map((point) => ({ date: point.date, label: point.label, bar: point.impressions, line: point.clicks }))}
+    />
+  );
+}
 
+function AnalyticsPerformance({ data }: { data: ClientReportViewData["ga4"] }) {
+  const { stats } = data;
+  return (
+    <SectionCard
+      title="Google Analytics"
+      subtitle="Website traffic and engagement"
+      icon="zoom-in"
+      className="mb-4"
+      aside={
+        <span className="text-xs text-slate">
+          {data.latestDataDate ? `Data through ${formatDate(`${data.latestDataDate}T12:00:00Z`)}` : "No imported data yet"}
+        </span>
+      }
+    >
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4" aria-label="Analytics summary">
+        <StatCard
+          label="Sessions"
+          value={formatCount(stats.sessions)}
+          icon="users"
+          tone="accent"
+          detail={stats.organicShare === null ? undefined : `${Math.round(stats.organicShare * 100)}% from organic search`}
+        />
+        <StatCard label="New users" value={formatCount(stats.newUsers)} icon="user-add" tone="sky" detail="First visits in this period" />
+        <StatCard
+          label="Engagement rate"
+          value={stats.engagementRate === null ? "-" : `${(stats.engagementRate * 100).toFixed(1)}%`}
+          icon="tick-badge"
+          detail="Engaged sessions ÷ sessions"
+        />
+        <StatCard label="Key events" value={formatCount(Math.round(stats.keyEvents))} icon="star" detail="Conversions recorded by GA4" />
+      </div>
+      {data.trend.length < 2 ? (
+        <EmptyState compact icon="zoom-in" title="No Analytics trend yet">
+          Import Google Analytics data to see sessions and daily active users over time.
+        </EmptyState>
+      ) : (
+        <DualSeriesChart
+          ariaLabel="Google Analytics sessions and daily active users over time"
+          barLabel="Sessions"
+          lineLabel="Daily active users"
+          points={data.trend.map((point) => ({ date: point.date, label: point.label, bar: point.sessions, line: point.activeUsers }))}
+        />
+      )}
+      {data.channels.length > 0 ? <ChannelTable channels={data.channels} /> : null}
+    </SectionCard>
+  );
+}
+
+function ChannelTable({ channels }: { channels: ClientReportViewData["ga4"]["channels"] }) {
+  return (
+    <TableWrap className="mt-4">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th className="text-right">Sessions</th>
+            <th>Share</th>
+            <th className="text-right">New users</th>
+            <th className="text-right">Key events</th>
+          </tr>
+        </thead>
+        <tbody>
+          {channels.map((channel) => (
+            <tr key={channel.channel}>
+              <td className="whitespace-nowrap font-medium">{channel.channel}</td>
+              <td className="text-right whitespace-nowrap">{formatCount(channel.sessions)}</td>
+              <td className="min-w-[8rem]">
+                <span className="flex items-center gap-2">
+                  <span className="block flex-1 h-1.5 rounded-full bg-line/70 overflow-hidden" aria-hidden="true">
+                    <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(2, Math.round(channel.share * 100))}%` }} />
+                  </span>
+                  <span className="text-xs text-slate w-10 text-right">{`${(channel.share * 100).toFixed(1)}%`}</span>
+                </span>
+              </td>
+              <td className="text-right whitespace-nowrap">{formatCount(channel.newUsers)}</td>
+              <td className="text-right whitespace-nowrap">{formatCount(Math.round(channel.keyEvents))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
+  );
+}
+
+type DualSeriesPoint = { date: string; label: string; bar: number; line: number };
+
+/** Bars on the left axis with a line on the right axis, shared by the Search Console and Analytics cards. */
+function DualSeriesChart({
+  points,
+  barLabel,
+  lineLabel,
+  ariaLabel
+}: {
+  points: DualSeriesPoint[];
+  barLabel: string;
+  lineLabel: string;
+  ariaLabel: string;
+}) {
   const width = 900;
   const height = 250;
   const padding = { top: 18, right: 42, bottom: 36, left: 48 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const maxImpressions = Math.max(1, ...points.map((point) => point.impressions));
-  const maxClicks = Math.max(1, ...points.map((point) => point.clicks));
+  const maxBar = Math.max(1, ...points.map((point) => point.bar));
+  const maxLine = Math.max(1, ...points.map((point) => point.line));
   const slotWidth = plotWidth / points.length;
   const barWidth = Math.max(2, Math.min(12, slotWidth * 0.62));
   const x = (index: number) => padding.left + slotWidth * index + slotWidth / 2;
-  const impressionY = (value: number) => padding.top + plotHeight - (value / maxImpressions) * plotHeight;
-  const clickY = (value: number) => padding.top + plotHeight - (value / maxClicks) * plotHeight;
-  const clickPath = points.map((point, index) => `${index ? "L" : "M"}${x(index)},${clickY(point.clicks)}`).join(" ");
+  const barY = (value: number) => padding.top + plotHeight - (value / maxBar) * plotHeight;
+  const lineY = (value: number) => padding.top + plotHeight - (value / maxLine) * plotHeight;
+  const linePath = points.map((point, index) => `${index ? "L" : "M"}${x(index)},${lineY(point.line)}`).join(" ");
   const gridValues = [0, 0.5, 1];
   const labelIndexes = new Set([0, Math.floor((points.length - 1) / 2), points.length - 1]);
 
   return (
     <div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-xs text-slate" aria-label="Chart series">
-        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-0.5 rounded-full bg-accent" aria-hidden="true" />Clicks</span>
-        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky/30" aria-hidden="true" />Impressions</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-0.5 rounded-full bg-accent" aria-hidden="true" />{lineLabel}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky/30" aria-hidden="true" />{barLabel}</span>
       </div>
       <div className="overflow-x-auto">
-        <svg className="block w-full h-auto min-w-[560px]" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Google Search Console clicks and impressions over time">
+        <svg className="block w-full h-auto min-w-[560px]" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={ariaLabel}>
           {gridValues.map((ratio) => {
             const y = padding.top + plotHeight - ratio * plotHeight;
             return (
               <g key={ratio}>
                 <line className="chart-grid-line" x1={padding.left} x2={width - padding.right} y1={y} y2={y} />
-                <text className="chart-axis-label" x={padding.left - 8} y={y + 4} textAnchor="end">{formatCount(Math.round(maxImpressions * ratio))}</text>
-                <text className="chart-axis-label" x={width - padding.right + 8} y={y + 4}>{formatCount(Math.round(maxClicks * ratio))}</text>
+                <text className="chart-axis-label" x={padding.left - 8} y={y + 4} textAnchor="end">{formatCount(Math.round(maxBar * ratio))}</text>
+                <text className="chart-axis-label" x={width - padding.right + 8} y={y + 4}>{formatCount(Math.round(maxLine * ratio))}</text>
               </g>
             );
           })}
           {points.map((point, index) => (
             <rect
               className="fill-sky/30"
-              height={padding.top + plotHeight - impressionY(point.impressions)}
+              height={padding.top + plotHeight - barY(point.bar)}
               key={point.date}
               width={barWidth}
               x={x(index) - barWidth / 2}
-              y={impressionY(point.impressions)}
+              y={barY(point.bar)}
             >
-              <title>{`${point.label}: ${formatCount(point.impressions)} impressions`}</title>
+              <title>{`${point.label}: ${formatCount(point.bar)} ${barLabel.toLowerCase()}`}</title>
             </rect>
           ))}
-          <path className="stroke-accent stroke-2 fill-none" strokeLinejoin="round" strokeLinecap="round" d={clickPath} />
+          <path className="stroke-accent stroke-2 fill-none" strokeLinejoin="round" strokeLinecap="round" d={linePath} />
           {points.map((point, index) => (
-            <g key={`click-${point.date}`}>
-              <circle className="fill-accent" cx={x(index)} cy={clickY(point.clicks)} r="2.4">
-                <title>{`${point.label}: ${formatCount(point.clicks)} clicks`}</title>
+            <g key={`line-${point.date}`}>
+              <circle className="fill-accent" cx={x(index)} cy={lineY(point.line)} r="2.4">
+                <title>{`${point.label}: ${formatCount(point.line)} ${lineLabel.toLowerCase()}`}</title>
               </circle>
               {labelIndexes.has(index) ? (
                 <text className="chart-axis-label" x={x(index)} y={height - 10} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"}>{point.label}</text>

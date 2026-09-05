@@ -3,12 +3,19 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 
+/** Searchable select used to map a Search Console site or an Analytics property to a report. */
 export function PropertyPicker({
   defaultValue,
-  options
+  options,
+  name,
+  label,
+  placeholder = "Search by name or account"
 }: {
   defaultValue: string;
   options: Array<{ label: string; value: string }>;
+  name: string;
+  label: string;
+  placeholder?: string;
 }) {
   const [query, setQuery] = useState("");
   const filteredOptions = useMemo(() => {
@@ -27,15 +34,15 @@ export function PropertyPicker({
           <input
             className="field pl-9"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by domain or account"
+            placeholder={placeholder}
             type="search"
             value={query}
           />
         </span>
       </label>
       <label className="block">
-        <span className="field-label">Search Console property</span>
-        <select name="gscProperty" required defaultValue={defaultValue} className="field">
+        <span className="field-label">{label}</span>
+        <select name={name} required defaultValue={defaultValue} className="field">
           <option value="" disabled>Select a property</option>
           {filteredOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
