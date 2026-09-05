@@ -34,9 +34,9 @@ export async function importLockHeld(key: string, now = new Date()) {
   return Boolean(lock && lock.lockedUntil > now);
 }
 
-export async function withImportLock<T>(key: string, busyMessage: string, work: () => Promise<T>): Promise<T> {
+export async function withImportLock<T>(key: string, busyMessage: string, work: () => Promise<T>, minutes = IMPORT_LOCK_MINUTES): Promise<T> {
   const owner = randomUUID();
-  if (!(await acquireImportLock(key, owner))) throw new ImportLockHeldError(busyMessage);
+  if (!(await acquireImportLock(key, owner, minutes))) throw new ImportLockHeldError(busyMessage);
   try {
     return await work();
   } finally {
@@ -44,7 +44,7 @@ export async function withImportLock<T>(key: string, busyMessage: string, work: 
   }
 }
 
-async function acquireImportLock(key: string, owner: string) {
+async function acquireImportLock(key: string, owner: string, minutes: number) {
   await prisma.systemLock.upsert({
     where: { key },
     create: { key, owner: null, lockedUntil: new Date(0) },
@@ -52,14 +52,19 @@ async function acquireImportLock(key: string, owner: string) {
   });
   const claimed = await prisma.systemLock.updateMany({
     where: { key, lockedUntil: { lt: new Date() } },
-    data: { owner, lockedUntil: new Date(Date.now() + IMPORT_LOCK_MINUTES * 60 * 1000) }
+    data: { owner, lockedUntil: new Date(Date.now() + minutes * 60 * 1000) }
   });
   return claimed.count === 1;
 }
 
+/** Best effort: a release that fails (the database went away, or a restore replaced the table) must not turn finished work into an error; the lock simply expires. */
 async function releaseImportLock(key: string, owner: string) {
-  await prisma.systemLock.updateMany({
-    where: { key, owner },
-    data: { owner: null, lockedUntil: new Date(0) }
-  });
+  try {
+    await prisma.systemLock.updateMany({
+      where: { key, owner },
+      data: { owner: null, lockedUntil: new Date(0) }
+    });
+  } catch (error) {
+    console.error(`[lock] ${key} could not be released; it expires on its own.`, error instanceof Error ? error.message : error);
+  }
 }

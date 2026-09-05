@@ -1,5 +1,6 @@
 import { recordVerification, resolveSecret, secretStatus, type SecretSummary } from "@/lib/app-secrets";
 import { writeAuditLog } from "@/lib/audit";
+import { BACKUP_HEARTBEAT_KEY, backupHealth, type BackupHealth } from "@/lib/backups";
 import { prisma } from "@/lib/db";
 import { envList } from "@/lib/env";
 import { enforceRateLimit, notificationSendRateLimit, RateLimitError, type RateLimitPolicy } from "@/lib/rate-limit";
@@ -362,6 +363,55 @@ export async function sendTestNotification(actorEmail: string): Promise<SendResu
   return sendNotification(testMessage({ actorEmail, appUrl: publicAppUrl("/settings") }), { kind: TEST_KIND, to: [actorEmail], ignoreEnabledFlag: true });
 }
 
+/* ---------- backup health ---------- */
+
+export const BACKUP_ALERT_KIND = "backup_health";
+/** One reminder a day is enough; the dashboard shows the state continuously. */
+const BACKUP_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export type BackupAlertHeartbeat = { lastSuccessAt: Date | null; lastFailureAt: Date | null; message: string | null } | null;
+
+export function backupHealthMessage(input: { health: BackupHealth; heartbeat: BackupAlertHeartbeat; appUrl: string | null; now?: Date }): NotificationMessage {
+  const failed = input.health.state === "failed";
+  const lastSuccess = input.heartbeat?.lastSuccessAt ? formatDayAndTime(input.heartbeat.lastSuccessAt) : "never";
+  const summary = failed
+    ? `The last database backup ${input.health.label === "Did not finish" ? "did not finish" : "failed"}. The last successful backup was ${lastSuccess}.`
+    : `No database backup has succeeded since ${lastSuccess}. The daily task may have stopped running.`;
+  const detail = failed && input.heartbeat?.message ? input.heartbeat.message : null;
+  const advice = "Check the Plesk scheduled task and run npm run db:backup by hand to see the error. Until this is fixed, a server failure would lose everything since the last successful backup.";
+  return {
+    subject: failed ? "Star Reports: the database backup failed" : "Star Reports: database backups are stale",
+    text: [summary, ...(detail ? [`Reason: ${detail}`] : []), "", advice, ...(input.appUrl ? ["", `Settings: ${input.appUrl}`] : [])].join("\n"),
+    html: htmlDocument(failed ? "The database backup failed" : "Database backups are stale", [
+      `<p>${escapeHtml(summary)}</p>`,
+      ...(detail ? [`<p>Reason: <em>${escapeHtml(detail)}</em></p>`] : []),
+      `<p>${escapeHtml(advice)}</p>`,
+      ...(input.appUrl ? [`<p><a href="${escapeHtml(input.appUrl)}">Open Settings</a></p>`] : [])
+    ])
+  };
+}
+
+/**
+ * Email administrators once a day while backups are failed or stale. Called by the worker on every
+ * run, so a backup task that silently stops is noticed within a day. A never-run install is not
+ * emailed: the dashboard reports it, and a fresh server should not receive alarms before setup.
+ */
+export async function notifyBackupHealth(now = new Date()): Promise<SendResult> {
+  const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { key: BACKUP_HEARTBEAT_KEY } });
+  const health = backupHealth(heartbeat, now);
+  if (health.state !== "failed" && health.state !== "stale") return { ok: false, skipped: true, message: `Backups are ${health.label.toLowerCase()}.` };
+  const alreadyAlerted = await prisma.auditLog.findFirst({
+    where: {
+      event: { in: ["notification.sent", "notification.failed", "notification.skipped"] },
+      createdAt: { gte: new Date(now.getTime() - BACKUP_ALERT_INTERVAL_MS) },
+      metadata: { path: ["kind"], equals: BACKUP_ALERT_KIND }
+    },
+    select: { id: true }
+  });
+  if (alreadyAlerted) return { ok: false, skipped: true, message: "A backup alert was already sent in the last day." };
+  return sendNotification(backupHealthMessage({ health, heartbeat, appUrl: publicAppUrl("/settings"), now }), { kind: BACKUP_ALERT_KIND });
+}
+
 /* ---------- helpers ---------- */
 
 export function escapeHtml(value: string) {
@@ -375,6 +425,10 @@ export function escapeHtml(value: string) {
 
 function outcomeVerb(status: string) {
   return status === "partial" ? "finished partially" : status === "blocked" ? "was blocked" : "failed";
+}
+
+function formatDayAndTime(value: Date) {
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }).format(value);
 }
 
 function formatDay(value: Date) {

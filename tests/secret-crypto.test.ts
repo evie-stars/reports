@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canDecryptSecret,
   decryptSecret,
   encryptSecret,
   fingerprintSecret,
   masterEncryptionKeyConfigured,
+  masterKeyFingerprint,
   readMasterEncryptionKey,
   readPreviousEncryptionKey,
   rotateEncryptedValue
@@ -100,4 +102,22 @@ test("during a rotation values under the previous key still decrypt while new va
       else process.env[name] = value;
     }
   }
+});
+
+test("backup verification can prove a key opens a value without the plaintext leaving the check, and name a key without revealing it", () => {
+  const key = "a".repeat(64);
+  const other = "b".repeat(64);
+  const stored = encryptSecret("hunter2", key);
+  assert.equal(canDecryptSecret(stored, key), true);
+  assert.equal(canDecryptSecret(stored, other), false);
+  assert.equal(canDecryptSecret("not.a.stored.value", key), false);
+  assert.equal(canDecryptSecret(stored, undefined), false, "no key configured means nothing opens");
+
+  const fingerprint = masterKeyFingerprint(key);
+  assert.match(fingerprint ?? "", /^[0-9a-f]{12}$/);
+  assert.equal(masterKeyFingerprint(key), fingerprint);
+  assert.notEqual(masterKeyFingerprint(other), fingerprint);
+  assert.equal(masterKeyFingerprint(undefined), null);
+  assert.equal(masterKeyFingerprint("too short"), null);
+  assert.ok(!fingerprint?.includes(key.slice(0, 6)));
 });

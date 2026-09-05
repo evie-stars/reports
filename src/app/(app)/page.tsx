@@ -12,6 +12,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
 import { secretStatus } from "@/lib/app-secrets";
+import { BACKUP_HEARTBEAT_KEY, backupHealth } from "@/lib/backups";
 import { prisma } from "@/lib/db";
 import { formatDate, formatUsd, plural } from "@/lib/format";
 import { roleLabel } from "@/lib/roles";
@@ -35,7 +36,8 @@ export default async function DashboardPage() {
   const liveApiEnabled = process.env.DATAFORSEO_LIVE_ENABLED === "true";
   const googleSignInEnabled = process.env.AUTH_ENABLED === "true";
   const worker = workerHealth(data.heartbeat);
-  const needsAttention = !data.dbUnavailable && (data.failedRuns > 0 || data.failedScheduledReports > 0 || !worker.healthy);
+  const backups = backupHealth(data.backupHeartbeat);
+  const needsAttention = !data.dbUnavailable && (data.failedRuns > 0 || data.failedScheduledReports > 0 || !worker.healthy || !backups.healthy);
   const activeUsers = data.users.filter((user) => user.enabled || isBootstrapAdmin(user.email)).length;
 
   return (
@@ -57,7 +59,8 @@ export default async function DashboardPage() {
         >
           {data.failedRuns > 0 ? `${plural(data.failedRuns, "report job")} failed or blocked in the last 7 days. ` : ""}
           {data.failedScheduledReports > 0 ? `${plural(data.failedScheduledReports, "automated report")} need attention. ` : ""}
-          {!worker.healthy ? `The rank worker is ${worker.label.toLowerCase()}.` : ""}
+          {!worker.healthy ? `The rank worker is ${worker.label.toLowerCase()}. ` : ""}
+          {!backups.healthy ? backups.state === "never" ? "Database backups have never run; add the daily backup task in Plesk." : `The last database backup ${backups.state === "failed" ? "failed" : "is stale"}; see Settings.` : ""}
         </Notice>
       ) : null}
 
@@ -77,6 +80,7 @@ export default async function DashboardPage() {
             <ConfigurationItem label="Paid API" value={liveApiEnabled ? "Enabled" : "Protected mode"} good={liveApiEnabled} />
             <ConfigurationItem label="Google sign-in" value={googleSignInEnabled ? "Enabled" : "Disabled"} good={googleSignInEnabled} />
             <ConfigurationItem label="Rank worker" value={worker.label} good={worker.healthy} />
+            <ConfigurationItem label="Database backups" value={backups.label} good={backups.healthy} />
             <ConfigurationItem label="Report queue" value={data.queuedRuns ? `${data.queuedRuns} waiting` : "Clear"} good={data.queuedRuns === 0} />
             <ConfigurationItem label="Monthly schedules" value={`${data.schedules} active`} good={data.schedules > 0} neutral={data.schedules === 0} />
             <ConfigurationItem label="Scheduled reports" value={data.failedScheduledReports ? `${data.failedScheduledReports} need attention` : "Healthy"} good={data.failedScheduledReports === 0} />
@@ -237,7 +241,7 @@ export default async function DashboardPage() {
 async function getDashboardData() {
   try {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, runs, reportRequests, users] = await Promise.all([
+    const [clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, backupHeartbeat, runs, reportRequests, users] = await Promise.all([
       prisma.client.count(),
       prisma.project.count(),
       prisma.keyword.count({ where: { active: true } }),
@@ -247,12 +251,13 @@ async function getDashboardData() {
       prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
       prisma.reportExecution.count({ where: { status: { in: ["partial", "failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
       prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
+      prisma.workerHeartbeat.findUnique({ where: { key: BACKUP_HEARTBEAT_KEY } }),
       prisma.rankRun.findMany({ orderBy: { createdAt: "desc" }, take: 6, include: { project: { include: { client: true } } } }),
       prisma.reportRequest.findMany({ where: { status: "pending" }, orderBy: { createdAt: "asc" }, take: 10 }),
       prisma.userAccess.findMany({ orderBy: [{ enabled: "desc" }, { name: "asc" }, { email: "asc" }] })
     ]);
 
-    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, runs, reportRequests, users, dbUnavailable: false };
+    return { clients, projects, keywords, locations, schedules, queuedRuns, failedRuns, failedScheduledReports, heartbeat, backupHeartbeat, runs, reportRequests, users, dbUnavailable: false };
   } catch {
     return {
       clients: 0,
@@ -264,6 +269,7 @@ async function getDashboardData() {
       failedRuns: 0,
       failedScheduledReports: 0,
       heartbeat: null,
+      backupHeartbeat: null,
       runs: [],
       reportRequests: [],
       users: [],
