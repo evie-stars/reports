@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 
 export type AuditEvent = {
   event: string;
@@ -38,10 +39,7 @@ export async function writeRequestAudit(input: Omit<AuditEvent, "ipAddress">) {
 
 async function requestIpAddress() {
   try {
-    const requestHeaders = await headers();
-    return requestHeaders.get("x-real-ip") ??
-      requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      null;
+    return clientIpFromHeaders(await headers());
   } catch {
     return null;
   }

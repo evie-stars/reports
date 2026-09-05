@@ -23,12 +23,13 @@
 - Workspace restyled to match the Team Hub design system (Tailwind, Poppins, shared icon set).
 - Google Analytics 4 connected through the shared read-only Google client, with per-report property mapping, 90-day imports split by channel, and an Analytics card on the client report and in snapshots.
 - Scheduled reports refresh mapped Analytics properties alongside Search Console, with stranded imports retried and lock collisions re-queued.
+- DataForSEO and Google client credentials managed from Settings: encrypted, write-only, verified with the provider before saving, with rollback, an environment kill-switch, and a master-key rotation script.
+- Read-only `/share/*` pages rate limited per caller address in the proxy, with every view counted and audited; Dependabot keeps dependencies and GitHub Actions current.
+- Optional email notifications to administrators for new team report requests and failed, partial, or blocked scheduled reports, with the mailbox managed in the key store and a test-email button.
 
 ## Next Integration Phase
 
-0. Rate limit and audit access to the read-only `/share/*` pages.
-1. Add optional email notifications for new team report requests and failed schedules.
-2. Extend the Analytics module with landing-page and event-level breakdowns once the security review in the README is complete.
+1. Extend the Analytics module with landing-page and event-level breakdowns once the security review in the README is complete.
 
 
 ## Cost Presentation

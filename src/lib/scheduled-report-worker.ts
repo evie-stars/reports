@@ -15,12 +15,14 @@ import { configuredPositiveInteger } from "@/lib/env";
 import { importProjectAnalyticsData } from "@/lib/ga4-import";
 import { importProjectSearchConsoleData } from "@/lib/gsc-import";
 import { ga4ImportLockKey, gscImportLockKey, importLockHeld, isImportLockHeldError } from "@/lib/import-lock";
+import { notifyScheduledReportOutcomes, type ScheduledReportModuleOutcome, type ScheduledReportOutcome } from "@/lib/notifications";
 import { enqueueScheduledRankRun, type QueueSelection } from "@/lib/rank-queue";
 import { deriveReportExecutionStatus, isTerminalReportExecutionStatus } from "@/lib/report-execution-status";
 import { enabledRankSearchTypes, hasRankTracking } from "@/lib/report-modules";
 import { effectiveScheduleDay, scheduleIsDue } from "@/lib/schedules";
 
 type ScheduledProject = Project & {
+  client: { id: string; name: string };
   keywords: { id: string }[];
   locations: { id: string }[];
 };
@@ -82,16 +84,23 @@ export async function enqueueDueReportExecutions(now = new Date()) {
   const projects = await prisma.project.findMany({
     where: { scheduleEnabled: true },
     include: {
+      client: { select: { id: true, name: true } },
       keywords: { where: { active: true }, select: { id: true } },
       locations: { where: { active: true }, select: { id: true } }
     }
   });
   let queued = 0;
+  const outcomes: ScheduledReportOutcome[] = [];
 
   // The day is clamped to the current month's length so a schedule on the 31st still runs in shorter months.
   for (const project of projects.filter((project) => scheduleIsDue(project.scheduleDay, now))) {
-    if (await createExecution(project, now)) queued += 1;
+    const created = await createExecution(project, now);
+    if (!created) continue;
+    queued += 1;
+    if (created.outcome) outcomes.push(created.outcome);
   }
+  // Reports blocked at creation never pass through syncOpenExecutions, so they are digested here.
+  await notifyScheduledReportOutcomes(outcomes);
   return queued;
 }
 
@@ -136,7 +145,7 @@ async function runModuleImports(candidates: ReportExecution[], adapter: ModuleIm
   return { imported, failed };
 }
 
-async function createExecution(project: ScheduledProject, now: Date) {
+async function createExecution(project: ScheduledProject, now: Date): Promise<{ outcome: ScheduledReportOutcome | null } | false> {
   const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const scheduledFor = new Date(Date.UTC(
     now.getUTCFullYear(),
@@ -239,32 +248,51 @@ async function createExecution(project: ScheduledProject, now: Date) {
       completedAt: isTerminalReportExecutionStatus(status) ? new Date() : null
     }
   });
+  // A resumed row can attach a rank run that already finished, so the terminal outcome is not always "blocked".
+  const terminal = isTerminalReportExecutionStatus(status);
   await writeAuditLog({
-    event: isTerminalReportExecutionStatus(status) ? "report.execution_blocked" : "report.execution_queued",
-    outcome: isTerminalReportExecutionStatus(status) ? "failure" : "success",
+    event: terminal ? `report.execution_${status}` : "report.execution_queued",
+    outcome: status === "completed" || !terminal ? "success" : "failure",
     actorEmail: "scheduler",
     actorRole: "system",
     entityType: "reportExecution",
     entityId: executionId,
     metadata: { projectId: project.id, modules, rankingsError, gscError: current.gscError, ga4Error: current.ga4Error }
   });
-  return true;
+  return {
+    outcome: terminal
+      ? {
+          executionId,
+          projectId: project.id,
+          clientId: project.client.id,
+          rankRunId,
+          status,
+          clientName: project.client.name,
+          projectName: project.name,
+          scheduledFor,
+          modules: moduleOutcomes(modules, { rankingsStatus, rankingsError, gscStatus: current.gscStatus, gscError: current.gscError, ga4Status: current.ga4Status, ga4Error: current.ga4Error })
+        }
+      : null
+  };
 }
 
 async function syncOpenExecutions() {
   const executions = await prisma.reportExecution.findMany({
     where: { status: { in: ["queued", "running"] } },
-    include: { rankRun: true }
+    include: { rankRun: true, project: { select: { name: true, clientId: true, client: { select: { name: true } } } } }
   });
   const counts = { completed: 0, partial: 0, failed: 0, blocked: 0 };
+  const outcomes: ScheduledReportOutcome[] = [];
 
   for (const execution of executions) {
     const rankingsStatus = execution.rankRun ? rankModuleStatus(execution.rankRun.status) : execution.rankingsStatus;
     const rankingsError = execution.rankRun?.lastError ?? execution.rankingsError;
     const status = deriveReportExecutionStatus([rankingsStatus, execution.gscStatus, execution.ga4Status]);
     const terminal = isTerminalReportExecutionStatus(status);
-    await prisma.reportExecution.update({
-      where: { id: execution.id },
+    // Compare-and-set on the status this run read, so two overlapping worker runs cannot both record
+    // (and email) the same transition.
+    const moved = await prisma.reportExecution.updateMany({
+      where: { id: execution.id, status: execution.status },
       data: {
         rankingsStatus,
         rankingsError,
@@ -273,7 +301,7 @@ async function syncOpenExecutions() {
         completedAt: terminal ? execution.completedAt ?? new Date() : null
       }
     });
-    if (!terminal || status === execution.status) continue;
+    if (moved.count === 0 || !terminal || status === execution.status) continue;
     if (status === "completed") counts.completed += 1;
     else if (status === "partial") counts.partial += 1;
     else if (status === "failed") counts.failed += 1;
@@ -295,8 +323,51 @@ async function syncOpenExecutions() {
         ga4Error: execution.ga4Error
       }
     });
+    outcomes.push({
+      executionId: execution.id,
+      projectId: execution.projectId,
+      clientId: execution.project.clientId,
+      rankRunId: execution.rankRunId,
+      status,
+      clientName: execution.project.client.name,
+      projectName: execution.project.name,
+      scheduledFor: execution.scheduledFor,
+      modules: moduleOutcomes(execution.modules, {
+        rankingsStatus,
+        rankingsError,
+        gscStatus: execution.gscStatus,
+        gscError: execution.gscError,
+        ga4Status: execution.ga4Status,
+        ga4Error: execution.ga4Error
+      })
+    });
   }
+  // One digest per run; completed reports are dropped by the notifier.
+  await notifyScheduledReportOutcomes(outcomes);
   return counts;
+}
+
+/** The selected modules of an execution with their outcome, in the order the Scheduled page shows them. */
+export function moduleOutcomes(
+  modules: ReportModule[],
+  states: {
+    rankingsStatus: ReportModuleRunStatus;
+    rankingsError: string | null;
+    gscStatus: ReportModuleRunStatus;
+    gscError: string | null;
+    ga4Status: ReportModuleRunStatus;
+    ga4Error: string | null;
+  }
+): ScheduledReportModuleOutcome[] {
+  const outcomes: ScheduledReportModuleOutcome[] = [];
+  if (hasRankTracking(modules)) {
+    const seo = modules.includes(ReportModule.rankings);
+    const maps = modules.includes(ReportModule.maps);
+    outcomes.push({ label: seo && maps ? "SEO + Maps" : maps ? "Maps" : "SEO", status: states.rankingsStatus, error: states.rankingsError });
+  }
+  if (modules.includes(ReportModule.gsc)) outcomes.push({ label: "Search Console", status: states.gscStatus, error: states.gscError });
+  if (modules.includes(ReportModule.ga4)) outcomes.push({ label: "Analytics", status: states.ga4Status, error: states.ga4Error });
+  return outcomes;
 }
 
 function rankSelection(project: ScheduledProject): QueueSelection {

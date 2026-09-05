@@ -56,9 +56,9 @@ https://reports.starwebsites.co.uk/api/auth/callback/google
 
 Set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and keep at least one recovery administrator in `AUTH_ADMIN_EMAILS`. Routine users and roles are managed from the admin dashboard and stored in PostgreSQL. A dashboard-managed email is allowed to sign in even when it is outside `AUTH_ALLOWED_DOMAINS`; an explicitly revoked database user remains blocked even if their domain is otherwise allowed. When the user table is unavailable, sign-ins fail closed rather than falling back to the domain allowlist. `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`, and `AUTH_MANAGER_EMAILS` remain available as bootstrap or broad company-access fallbacks. Sessions expire after `AUTH_SESSION_MAX_AGE_HOURS` (10 hours by default).
 
-- **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls.
+- **Admin:** dashboard, global settings, connections, access links, API diagnostics, costs, and all report controls. Changing API keys is reserved for the administrators listed in `AUTH_ADMIN_EMAILS`.
 - **Manager:** client and report setup, report content, keywords, areas, schedules, and Search Console and Analytics property mapping.
-- **Team:** read-only reports, guarded report reruns, schedules, and report requests. Cost and monetary data is not rendered for this role.
+- **Team:** read-only reports, guarded report reruns, schedules, and report requests (which can email administrators, see Email Notifications). Cost and monetary data is not rendered for this role.
 
 The dashboard access panel records successful users automatically, supports direct invitations by verified Google email, applies role changes on the next authenticated request, and keeps environment administrators protected as emergency recovery accounts.
 
@@ -67,18 +67,89 @@ The dashboard access panel records successful users automatically, supports dire
 - A per-request nonce-based Content Security Policy is set in `src/proxy.ts`. Scripts run only when they carry the request nonce, so injected inline scripts cannot execute. HSTS, frame, MIME-sniffing, referrer, and browser-permission headers are applied by Next.js.
 - A production server (`NODE_ENV=production`) refuses to start unless `AUTH_ENABLED=true` and `AUTH_SECRET` are set, so the local "everyone is an administrator" mode can never reach a live deployment.
 - If the managed user table cannot be read during sign-in or session refresh, access is denied until the database recovers. Only `AUTH_ADMIN_EMAILS` remain reachable, as the emergency recovery path.
-- Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, and share-link changes are stored in the admin audit trail.
+- Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, share-link changes, and every API key change are stored in the admin audit trail. Key values never appear in it.
 - Database-backed limits protect authenticated mutations, paid reports, share-link changes, Google sign-ins, and the locations API. Limits are configurable with the `RATE_LIMIT_*` environment variables.
 - The rank worker records a heartbeat on every run. The dashboard and Settings page flag stale workers and failed or blocked jobs from the last seven days.
-- Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account.
+- A daily backup task dumps the database, proves the archive decodes and restores, and records the outcome; the dashboard and Settings flag a backup that failed or has not succeeded within `BACKUP_STALE_HOURS`, and the worker emails administrators once a day while that is the case (see Database Backups).
+- Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account, so every view is rate limited per caller address in the proxy (`RATE_LIMIT_SHARE_VIEWS_PER_MINUTE`, answered with HTTP 429 and `Retry-After`), counted on the client or snapshot, and recorded in the audit trail with the address.
 
 ## Remaining Security Work
 
 Complete these infrastructure-level items as the reporting integrations expand:
 
-1. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
+1. Establish Plesk patching (operating system, PostgreSQL, and Node.js updates on a schedule). Dependency updates arrive weekly through Dependabot (`.github/dependabot.yml`), grouped for minor and patch bumps, and must pass CI before merging. Database backups and the restore procedure are covered under Database Backups below.
 2. Complete a focused application and infrastructure security review before importing broader analytics datasets, such as landing-page or event-level GA4 data.
-3. Rate limit and audit the read-only `/share/*` pages, which are reachable without a Google account.
+
+## API Keys
+
+The DataForSEO login and password and the Google integrations client ID and secret can be rotated from **Settings → API keys** instead of editing `.env` on Plesk. The environment variables keep working as a bootstrap fallback; a key saved in the app takes precedence and applies to new requests immediately, including the scheduled worker.
+
+- Values are write-only. The page shows a masked hint, a keyed fingerprint, the version, who saved it and when, and the result of the last check. No stored value is ever sent to a browser.
+- Values are encrypted at rest with AES-256-GCM under the master key in `APP_SECRETS_ENCRYPTION_KEY`, which only exists in the server environment. A database dump alone cannot recover them. The app reads the key from the Plesk environment and the worker from `.env`, so the same value must be set in both places; a stored key the worker cannot decrypt is reported as unreadable rather than silently replaced by the environment value.
+- Only administrators listed in `AUTH_ADMIN_EMAILS` can save, check, roll back or remove keys. Other administrators see the status only. Changes are rate-limited (`RATE_LIMIT_SECRET_CHANGES_PER_HOUR`) and audited without values.
+- **Save and check** proves the new credentials with the provider before they replace the current ones: DataForSEO is asked for its free account summary, and Google's token endpoint is asked to reject a deliberately invalid refresh token, which only succeeds when the client ID and secret are accepted. A definitive rejection is not saved. If the provider cannot be reached the key is saved with a warning and can be checked again later.
+- The previous version is kept for a one-click **Roll back**. **Remove from app** returns to the environment value; the confirmation says whether one exists and whether it differs. Both are refused when they would switch to a different account or client while paid tasks are pending or accounts are connected: save those credentials through the form with the confirmation ticked instead.
+- A different DataForSEO login cannot collect paid tasks posted by the old account, and a different Google client ID invalidates every stored refresh token, so both need an explicit confirmation on the form. Rotating a password or client secret within the same account is safe.
+- The Google check confirms only that the client ID and secret are accepted. It cannot tell whether the redirect URI is registered on that client, whether the required APIs are enabled, or whether the consent screen is still in testing mode (which expires refresh tokens after seven days).
+- **Incident response:** set `APP_SECRETS_SOURCE=environment` in Plesk and restart. The app then ignores every stored key, uses the environment values, and disables the forms until the variable is removed.
+
+### Rotating the master key
+
+1. Set `APP_SECRETS_ENCRYPTION_KEY` to a new `openssl rand -hex 32` value and `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` to the key currently protecting the database, in both the Plesk environment and `.env`. A deployment that only ever had the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` can leave it in place instead: a legacy key that differs from the new one is treated as the previous key.
+2. Restart the app and the worker. From now on both read values encrypted under either key and write only under the new one, so nothing is lost during the rotation.
+3. Run `npm run secrets:rekey`. Every stored key and Google refresh token is re-encrypted in one transaction while a lock blocks saves from Settings; the script can be re-run safely, and Settings shows a reminder until the previous key is gone.
+4. Store the retired key in the password manager, labelled with the rotation date, and keep it for at least `BACKUP_RETENTION_DAYS`: every backup taken before the rekey is encrypted under it (see Database Backups). Then remove `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` and the legacy variable and restart again.
+
+Existing deployments need no change to keep working: the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` is read whenever the new name is empty. Do not generate a fresh `APP_SECRETS_ENCRYPTION_KEY` on a deployment that already has connected Google accounts without following the rotation steps above.
+
+## Email Notifications
+
+Administrators can be emailed when a team member submits a report request, and once per worker run when scheduled monthly reports finish failed, partial, or blocked (one digest listing every report that needs attention, with a link to each report's settings and rank run). Completed runs do not email. Nothing is sent until three things are in place:
+
+1. `NOTIFICATIONS_ENABLED="true"` and a `NOTIFICATIONS_FROM` address (for example `Star Reports <reports@starwebsites.co.uk>`). The app reads the Plesk environment and the worker reads `.env`, so set both there and in `.env`; the Settings card shows what the worker saw on its last run and warns when the two disagree.
+2. An authenticated mailbox, saved under **Settings → API keys → Outgoing email (SMTP)** or set with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. Use a Plesk mailbox on port 587 (STARTTLS) or 465 (TLS); plain connections are refused so the password is never sent in the clear, and an unauthenticated port-25 relay is not supported. Use the host name shown on the Plesk mail certificate, and make `NOTIFICATIONS_FROM` the mailbox's own address (a display name is fine), because most servers refuse to send as anyone else. Saving the mailbox checks the login with the mail server first: a refused password, an unknown host, a closed port, or a certificate mismatch is rejected outright, while a timeout is saved with a warning.
+3. Recipients: every enabled administrator who has signed in, or the comma-separated `NOTIFICATION_EMAILS` list when set. Keep that list to staff mailboxes, because the emails name clients, quote requester notes, and include error text.
+
+The Settings page shows the notification status and a **Send test email** button, which emails only the signed-in administrator, works even while sending is disabled, and is limited to `RATE_LIMIT_NOTIFICATION_TESTS_PER_HOUR`. A saved mailbox proves the login; the test email proves delivery, including that the From address is accepted. Report-request emails are capped at three per hour per requester, and every kind of notification at `RATE_LIMIT_NOTIFICATIONS_PER_HOUR` across the app (the request itself is always stored; a skipped email is audited). Every send, skip, or failure is recorded in the audit trail with only a summary of the reason, never the server's response text, and a delivery problem never blocks the request or the worker. Repeated failed mailbox checks count as failed logins on the mail server, so a Plesk fail2ban rule may briefly block the app server's own address; whitelist it there if that happens.
+
+## Database Backups
+
+`npm run db:backup` writes a compressed PostgreSQL archive and proves it is usable before it counts. Run it from a daily Plesk scheduled task, off-peak:
+
+```bash
+cd /var/www/vhosts/starwebsites.co.uk/reports.starwebsites.co.uk && npm run db:backup
+```
+
+On Plesk set `BACKUP_DIR=/var/www/vhosts/starwebsites.co.uk/backups`: outside the app root, so nothing that rebuilds or redeploys the app can touch it, and inside the subscription, so Plesk Backup Manager carries the archives off the server. Schedule the task outside 01:00–02:00 server time (the clock-change hour) and set `BACKUP_STALE_HOURS`, in both Plesk and `.env`, to the task interval plus about two hours (26 for a daily task).
+
+Each run, in order: checks that `BACKUP_DIR` is private to the app user and not under `public/` or `.next/`, that `pg_dump` and `pg_restore` exist and are at least the server's major version (set `BACKUP_PG_BIN` when they are not on the task's PATH, for example `/usr/pgsql-16/bin`), and that the disk has room for another archive; removes archives older than `BACKUP_RETENTION_DAYS` while always keeping the newest `BACKUP_KEEP_MINIMUM`; dumps the schema inside one snapshot, counting every table from the same snapshot; writes `star-reports-<date>-<time>.dump` with a `.sha256` checksum and a `.meta.json` manifest (row counts, tool and server versions, and the master key's fingerprint, never the key); lists the archive to confirm every table the schema defines is present and decodes the whole archive to prove it is intact. The database password travels to the tools in `PGPASSWORD`, never on the command line. An archive that fails any check is deleted and the task exits non-zero, so enable the Plesk task's failure notification.
+
+**Test restores.** Create a second, empty database on the same server for the same database user and set `BACKUP_VERIFY_DATABASE_URL` to it. Every backup is then restored into it, every table's row count must equal the snapshot's, and every stored API key and Google token is checked against this server's master key (the plaintext never leaves the check). The scratch database is emptied again afterwards and marked with a `_star_reports_scratch` table; the script refuses to empty any database that has other tables and no marker, and refuses a scratch URL whose database name matches the live one, so a mistyped URL cannot touch live data. Without a scratch database the backup is still decoded in full, and Settings says "archive decoded" instead of "restore tested".
+
+**What the archive does not contain.** Stored API keys and Google refresh tokens are encrypted under `APP_SECRETS_ENCRYPTION_KEY`, which exists only in the Plesk environment and `.env`. Keep that key and a copy of `.env` in the password manager: a dump without the key restores every report but leaves the stored keys and Google connections unreadable until they are re-entered. After a key rotation, older archives in the retention window are under the previous key; the manifest records which key each archive needs, and the restore script compares it with the keys configured here. Backups are only a defence against database loss once a copy leaves the server: include `BACKUP_DIR` in Plesk Backup Manager's scheduled backups to remote storage, or copy it elsewhere with rsync. The archive holds every client's data and the audit trail, so it needs the same care as the database.
+
+**Health.** The result is recorded in the `database-backup` heartbeat. Settings > Operations shows the last backup, its size, and how far it was proven; the dashboard flags backups that have never run, a run that failed, a run that did not finish (interrupted by a reboot or the out-of-memory killer, recorded as a failure by the next run), and a last success older than `BACKUP_STALE_HOURS`; and the worker emails administrators once a day while a backup has failed, did not finish, or is stale, if notifications are enabled. Only one backup runs at a time (a database lock), each `pg_dump` and `pg_restore` step is stopped after `BACKUP_TIMEOUT_MINUTES`, and the heartbeat and audit writes after a verified dump are best-effort: the task's exit code reflects the backup alone.
+
+### Restoring
+
+1. Stop the app in Plesk (Node.js > Stop) and disable the worker's scheduled task. The restore refuses to run while other sessions are connected to the database, and waits for no one: if the nightly backup is running it stops with a message, so try again when it has finished.
+2. Confirm the master key: `APP_SECRETS_ENCRYPTION_KEY` in `.env` must be the key the archive was taken under (the restore script checks the manifest and says so). After a rotation, set the older key as `APP_SECRETS_PREVIOUS_ENCRYPTION_KEY` and follow Rotating the master key afterwards.
+3. Preview, then restore. The preview shows the archive's origin, checksum, tables, row counts, and key, and what the live database holds now; nothing changes until `--confirm` names the target database exactly:
+
+   ```bash
+   npm run db:restore -- --file backups/star-reports-20260905-020000.dump --target live
+   npm run db:restore -- --file backups/star-reports-20260905-020000.dump --target live --confirm star_reports
+   ```
+
+   The live database is first copied to `BACKUP_DIR/pre-restore-<database>-<time>.dump` (kept until you delete it; `--no-safety-copy` skips it), then its schema is emptied and the archive restored in one transaction, so a failure leaves nothing half-done. Restored lock rows are released and a backup heartbeat frozen mid-run in the archive is settled. Pass `--allow-other-sessions` only when you are certain the remaining connections are idle, and `--ignore-key-mismatch` to restore an archive whose stored keys will need re-entering.
+4. Run `npm run db:push` to add any tables introduced since the archive was taken, restart the app and the worker, and re-enable the scheduled task.
+5. Open Settings: the stored keys must show as readable, Google connections present, and the worker healthy on its next run. The audit trail records `backup.restored`.
+
+An archive from an older PostgreSQL major restores into a newer server; the reverse does not, which is why the manifest records both versions.
+
+### Restore drill
+
+Every quarter, prove the runbook works without touching live data: run the restore with `--target verify --confirm <scratch database name>`, which restores into the scratch database from `BACKUP_VERIFY_DATABASE_URL`, then start a second copy of the app against it with `DATABASE_URL` set to the scratch URL, `DATAFORSEO_LIVE_ENABLED=false`, and `NOTIFICATIONS_ENABLED=false`, and check a client report, Settings > API keys, and the audit trail. The next nightly backup empties the scratch database again. Record the date of the drill; the archive manifest and the audit trail record the rest.
 
 ## Google Search Console
 
@@ -90,16 +161,16 @@ Create a Google OAuth web client with this production redirect URI, and enable t
 https://reports.starwebsites.co.uk/api/integrations/google/callback
 ```
 
-Set these server variables:
+Set the redirect URI and the master key on the server, and either save the client ID and secret under **Settings → API keys** or set them as environment variables:
 
 ```text
-GOOGLE_SEARCH_CONSOLE_CLIENT_ID
-GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET
 GOOGLE_SEARCH_CONSOLE_REDIRECT_URI
-GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY
+APP_SECRETS_ENCRYPTION_KEY
+GOOGLE_SEARCH_CONSOLE_CLIENT_ID      (optional when stored in the app)
+GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET  (optional when stored in the app)
 ```
 
-Generate the encryption key once with `openssl rand -hex 32`, store it with the application secrets, and include it in database-backup recovery documentation. Changing or losing this key makes existing connected-account tokens unreadable.
+The token encryption key is the master key described under [API Keys](#api-keys) (`APP_SECRETS_ENCRYPTION_KEY`, or the legacy `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY`). Losing it makes existing connected-account tokens unreadable; rotating it is supported with `npm run secrets:rekey`.
 
 After deployment, open **Settings**, connect the Google account for Search Console, then open a report's settings and select its Search Console property. The Search Console grant requests only `webmasters.readonly` access. Disconnecting an account in Report Hub removes the locally stored token together with its Search Console and Analytics report mappings; Google account access can also be removed separately from the Google account's connected-app settings.
 
@@ -131,7 +202,7 @@ The workspace shares its design language with Team Hub: Tailwind CSS v3 with the
    cp .env.example .env
    ```
 
-3. Set `DATABASE_URL` to your PostgreSQL database.
+3. Set `DATABASE_URL` to your PostgreSQL database and generate `APP_SECRETS_ENCRYPTION_KEY` with `openssl rand -hex 32` if you intend to use the Google integrations or manage API keys in the app.
 
 4. Generate the Prisma client and create tables:
 
@@ -162,7 +233,7 @@ It lists any rows that would violate those constraints and exits non-zero until 
 1. Create a Node.js app in Plesk pointing at this project directory.
 2. Set the application startup file to `server.js`.
 3. Set the document root to the `public` subdirectory.
-4. Add the environment variables from `.env.example` in Plesk. Security and rate-limit values have conservative defaults, but should be set explicitly in production.
+4. Add the environment variables from `.env.example` in Plesk, including a generated `APP_SECRETS_ENCRYPTION_KEY` (an existing deployment keeps its `GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY` value instead, or rotates it as described under API Keys). Security and rate-limit values have conservative defaults, but should be set explicitly in production. Provider credentials can be left empty and saved from Settings after the first sign-in.
 5. Create the database in Plesk and use the connection string as `DATABASE_URL`.
 6. Run:
 
@@ -179,11 +250,17 @@ It lists any rows that would violate those constraints and exits non-zero until 
    cd /var/www/vhosts/starwebsites.co.uk/reports.starwebsites.co.uk && npm run rank:worker
    ```
 
+8. Add a second Plesk Scheduled Task, daily and off-peak, with the failure notification enabled:
+
+   ```bash
+   cd /var/www/vhosts/starwebsites.co.uk/reports.starwebsites.co.uk && npm run db:backup
+   ```
+
 The exact `cd` path must be the application root shown by Plesk. The npm worker command explicitly loads the application `.env`, matching the command that was verified on the Plesk server. The worker creates due report executions, submits or collects Standard ranking tasks, refreshes scheduled Search Console and Google Analytics data, processes optional keyword metrics, and records a health heartbeat. Keep the scheduled interval below `RANK_WORKER_STALE_MINUTES` so a missed worker run raises an alert. Only enable schedules after confirming the task count, the Standard task cap, the cost preview, and available DataForSEO balance.
 
 ## DataForSEO Safety
 
-The integration defaults to Sandbox:
+Credentials come from **Settings → API keys** or, as a fallback, `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD`. The integration defaults to Sandbox:
 
 - `DATAFORSEO_SANDBOX=true`
 - `DATAFORSEO_LIVE_ENABLED=false`

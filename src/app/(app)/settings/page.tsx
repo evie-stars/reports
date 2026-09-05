@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { disconnectGoogleConnection } from "@/actions/integrations";
 import { Icon } from "@/components/icon";
+import { ApiKeyCard } from "@/components/settings/api-key-card";
+import { NotificationsCard } from "@/components/settings/notifications-card";
 import { SubmitButton } from "@/components/submit-button";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
@@ -9,6 +11,8 @@ import { SectionCard } from "@/components/ui/section-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
+import { allSecretStatuses, canManageSecrets, isSecretName, SECRET_DEFINITIONS, secretStoreLocked } from "@/lib/app-secrets";
+import { BACKUP_HEARTBEAT_KEY, BACKUP_STALE_HOURS_ENV, backupHealth, DEFAULT_BACKUP_STALE_HOURS } from "@/lib/backups";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
 import { formatDate, formatDateTime, formatUsd, plural, readableAuditEvent, readableValue, type Tone } from "@/lib/format";
@@ -16,11 +20,14 @@ import {
   connectionHasScope,
   GA4_READONLY_SCOPE,
   GOOGLE_INTEGRATION_PRODUCTS,
-  googleIntegrationsConfigured,
+  googleIntegrationsSetup,
   GSC_READONLY_SCOPE,
   isGoogleIntegrationProduct,
-  type GoogleIntegrationProduct
+  type GoogleIntegrationProduct,
+  type GoogleIntegrationsSetup
 } from "@/lib/google-oauth";
+import { notificationStatus } from "@/lib/notifications";
+import { MASTER_KEY_ENV, masterEncryptionKeyConfigured, readPreviousEncryptionKey } from "@/lib/secret-crypto";
 import { workerHealth } from "@/lib/worker-health";
 
 export const dynamic = "force-dynamic";
@@ -35,9 +42,18 @@ type GoogleConnectionRow = {
 };
 
 export default async function SettingsPage({ searchParams }: {
-  searchParams: Promise<{ google?: string; googleWarning?: string; googleError?: string }>;
+  searchParams: Promise<{
+    google?: string;
+    googleWarning?: string;
+    googleError?: string;
+    secret?: string;
+    secretName?: string;
+    secretError?: string;
+    notify?: string;
+    notifyError?: string;
+  }>;
 }) {
-  const { google, googleWarning, googleError } = await searchParams;
+  const { google, googleWarning, googleError, secret, secretName, secretError, notify, notifyError } = await searchParams;
   const actor = await currentActor();
   if (actor.role !== "admin") redirect("/");
   const sandbox = process.env.DATAFORSEO_SANDBOX !== "false";
@@ -45,11 +61,25 @@ export default async function SettingsPage({ searchParams }: {
   const maxLiveTasks = process.env.DATAFORSEO_MAX_LIVE_TASKS_PER_RUN ?? "1";
   const maxStandardTasks = process.env.DATAFORSEO_MAX_STANDARD_TASKS_PER_RUN ?? "1000";
   const keywordMetricsEnabled = process.env.DATAFORSEO_KEYWORD_METRICS_ENABLED === "true";
-  const credentialsConfigured = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const authEnabled = process.env.AUTH_ENABLED === "true";
-  const googleConfigured = googleIntegrationsConfigured();
-  const { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable } = await getSettingsData();
+  const [googleSetup, secrets, notifications, { budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable }] = await Promise.all([
+    googleIntegrationsSetup(),
+    allSecretStatuses(),
+    notificationStatus(),
+    getSettingsData()
+  ]);
+  const googleConfigured = googleSetup.configured;
+  const dataForSeoSecret = secrets.find((summary) => summary.name === "dataforseo");
+  const credentialsConfigured = dataForSeoSecret?.configured ?? false;
+  const canRotateKeys = canManageSecrets(actor);
+  const keyStoreDisabledReason = masterEncryptionKeyConfigured()
+    ? undefined
+    : `${MASTER_KEY_ENV} is not set on the server. Generate one with "openssl rand -hex 32", add it in Plesk, and restart the app.`;
+  const keyStoreUsable = !keyStoreDisabledReason && !secretStoreLocked();
+  const previousKeyConfigured = Boolean(readPreviousEncryptionKey());
+  const secretLabel = isSecretName(secretName) ? SECRET_DEFINITIONS[secretName].label : "API key";
   const worker = workerHealth(heartbeat);
+  const backups = backupHealth(backupHeartbeat);
   const allowedAccessConfigured = managedUsers > 0 || Boolean(process.env.AUTH_ALLOWED_EMAILS || process.env.AUTH_ALLOWED_DOMAINS);
   const gscConnections = connections.filter((connection) => connectionHasScope(connection, GSC_READONLY_SCOPE));
   const ga4Connections = connections.filter((connection) => connectionHasScope(connection, GA4_READONLY_SCOPE));
@@ -75,6 +105,21 @@ export default async function SettingsPage({ searchParams }: {
         </Notice>
       ) : null}
       {googleError ? <Notice tone="danger" title="Google account was not connected.">{googleError}</Notice> : null}
+      {secret === "saved" ? <Notice tone="success" title={`${secretLabel} credentials saved and verified.`}>They apply to new requests immediately.</Notice> : null}
+      {secret === "saved-unverified" ? (
+        <Notice tone="warn" title={`${secretLabel} credentials saved, but could not be verified.`}>The provider did not answer conclusively. Run a test from the card below.</Notice>
+      ) : null}
+      {secret === "verified" ? <Notice tone="success" title={`${secretLabel} credentials verified.`}>The provider accepted them.</Notice> : null}
+      {secret === "rolled-back" ? <Notice tone="success" title={`Previous ${secretLabel} credentials restored.`}>Run a test to confirm they still work.</Notice> : null}
+      {secret === "removed" ? <Notice tone="success" title={`${secretLabel} credentials removed from the app.`}>The server environment value is used now, if one is set.</Notice> : null}
+      {secretError ? <Notice tone="danger" title={`${secretLabel} credentials were not changed.`} role="alert">{secretError}</Notice> : null}
+      {notify === "sent" ? <Notice tone="success" title="Test email sent.">Check the inbox for {actor.email}.</Notice> : null}
+      {notifyError ? <Notice tone="danger" title="Test email was not sent." role="alert">{notifyError}</Notice> : null}
+      {previousKeyConfigured ? (
+        <Notice tone="warn" title="A previous master key is still configured.">
+          Stored values still open with it for now. Run <code className="font-mono text-xs">npm run secrets:rekey</code>, then remove APP_SECRETS_PREVIOUS_ENCRYPTION_KEY and the legacy GOOGLE_SEARCH_CONSOLE_TOKEN_ENCRYPTION_KEY.
+        </Notice>
+      ) : null}
       {dbUnavailable ? (
         <Notice tone="warn" title="Database not connected yet.">Budget, worker health, connections and audit events will appear here once the database is configured.</Notice>
       ) : null}
@@ -83,7 +128,13 @@ export default async function SettingsPage({ searchParams }: {
         <SectionCard title="DataForSEO" subtitle="Ranking data provider" icon="cog">
           <dl className="divide-y divide-line text-sm">
             <SettingRow label="Credentials">
-              <StatusPill tone={credentialsConfigured ? "accent" : "blocked"}>{credentialsConfigured ? "Configured" : "Missing"}</StatusPill>
+              <StatusPill tone={credentialsConfigured ? "accent" : "blocked"}>
+                {dataForSeoSecret?.unavailable
+                  ? "Store unavailable"
+                  : !credentialsConfigured
+                    ? dataForSeoSecret?.source === "app" ? "Unreadable" : "Missing"
+                    : dataForSeoSecret?.source === "app" ? "Stored in app" : "Server environment"}
+              </StatusPill>
             </SettingRow>
             <SettingRow label="Default mode">{sandbox ? "Sandbox" : "Live"}</SettingRow>
             <SettingRow label="Live enabled">
@@ -109,6 +160,8 @@ export default async function SettingsPage({ searchParams }: {
           subtitle="Organic performance data"
           icon="search"
           configured={googleConfigured}
+          setup={googleSetup}
+          keyStoreUsable={keyStoreUsable}
           connections={gscConnections}
           otherConnections={connections.length - gscConnections.length}
           mappedCount={(connection) => connection._count.gscProjects}
@@ -121,6 +174,8 @@ export default async function SettingsPage({ searchParams }: {
           subtitle="Website traffic and engagement"
           icon="zoom-in"
           configured={googleConfigured}
+          setup={googleSetup}
+          keyStoreUsable={keyStoreUsable}
           connections={ga4Connections}
           otherConnections={connections.length - ga4Connections.length}
           mappedCount={(connection) => connection._count.ga4Projects}
@@ -146,7 +201,9 @@ export default async function SettingsPage({ searchParams }: {
           </dl>
         </SectionCard>
 
-        <SectionCard title="Operations" subtitle="Rank worker health" icon="refresh">
+        <NotificationsCard status={notifications} actorEmail={actor.email} />
+
+        <SectionCard title="Operations" subtitle="Rank worker and database backups" icon="refresh">
           <dl className="divide-y divide-line text-sm">
             <SettingRow label="Rank worker">
               <StatusPill tone={worker.healthy ? "accent" : "blocked"}>{worker.label}</StatusPill>
@@ -159,8 +216,46 @@ export default async function SettingsPage({ searchParams }: {
             <SettingRow label="Last worker result">
               {heartbeat ? `${heartbeat.submitted} submitted, ${heartbeat.collected} collected` : "Not recorded"}
             </SettingRow>
+            <SettingRow label="Database backup">
+              <StatusPill tone={backups.healthy ? "accent" : backups.state === "never" ? "warn" : "blocked"}>{backups.label}</StatusPill>
+              {backups.state === "never" ? (
+                <span className="block text-xs text-slate mt-1">Add the daily <code className="font-mono">npm run db:backup</code> task in Plesk (README, “Database Backups”).</span>
+              ) : null}
+              {backups.state === "stale" ? <span className="block text-xs text-warn mt-1">No successful backup within the last {process.env[BACKUP_STALE_HOURS_ENV] || DEFAULT_BACKUP_STALE_HOURS} hours. Check the Plesk scheduled task.</span> : null}
+              {backups.label === "Did not finish" && backupHeartbeat?.startedAt ? <span className="block text-xs text-blocked mt-1">The run started {formatDateTime(backupHeartbeat.startedAt)} never recorded a result. Check the Plesk task output and the server log.</span> : null}
+            </SettingRow>
+            <SettingRow label="Last backup">
+              {backupHeartbeat?.lastSuccessAt ? (
+                <>
+                  <span>{formatDateTime(backupHeartbeat.lastSuccessAt)}</span>
+                  {backupHeartbeat.status === "healthy" && backupHeartbeat.message ? <span className="block text-xs text-slate mt-1 break-words">{backupHeartbeat.message}</span> : null}
+                </>
+              ) : "Not recorded"}
+            </SettingRow>
+            <SettingRow label="Last backup failure">
+              {backupHeartbeat?.lastFailureAt ? (
+                <>
+                  <span>{formatDateTime(backupHeartbeat.lastFailureAt)}</span>
+                  {backupHeartbeat.status === "failed" && backupHeartbeat.message ? <span className="block text-xs text-blocked mt-1 break-words">{backupHeartbeat.message}</span> : null}
+                </>
+              ) : "None recorded"}
+            </SettingRow>
           </dl>
         </SectionCard>
+      </div>
+
+      <div id="api-keys" className="mt-6">
+        <div className="mb-3">
+          <h2 className="text-base">API keys</h2>
+          <p className="text-xs text-slate mt-0.5">
+            Rotate provider credentials without touching the server. Values are encrypted with the server-held key, never shown again, and audited on every change.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {secrets.map((summary) => (
+            <ApiKeyCard key={summary.name} summary={summary} canManage={canRotateKeys} disabledReason={keyStoreDisabledReason} />
+          ))}
+        </div>
       </div>
 
       <SectionCard
@@ -210,6 +305,8 @@ function GoogleProductCard({
   subtitle,
   icon,
   configured,
+  setup,
+  keyStoreUsable,
   connections,
   otherConnections,
   mappedCount,
@@ -220,6 +317,9 @@ function GoogleProductCard({
   subtitle: string;
   icon: "search" | "zoom-in";
   configured: boolean;
+  setup: GoogleIntegrationsSetup;
+  /** False when the in-app key store cannot take a value (no master key, or locked to the environment). */
+  keyStoreUsable: boolean;
   connections: GoogleConnectionRow[];
   /** Connected accounts that have not granted this product. */
   otherConnections: number;
@@ -233,7 +333,7 @@ function GoogleProductCard({
   return (
     <SectionCard title={title} subtitle={subtitle} icon={icon} aside={<StatusPill tone={tone}>{status}</StatusPill>}>
       {!configured ? (
-        <p className="text-sm text-slate">Add the four Google integration environment variables before connecting an account.</p>
+        <p className="text-sm text-slate">Before an account can be connected: {missingGoogleSetup(setup, keyStoreUsable)}.</p>
       ) : connections.length === 0 ? (
         <div className="flex flex-col items-start gap-3">
           <p className="text-sm text-slate">{intro}</p>
@@ -277,6 +377,19 @@ function GoogleProductCard({
   );
 }
 
+function missingGoogleSetup(setup: GoogleIntegrationsSetup, keyStoreUsable: boolean) {
+  const missing = [
+    ...(setup.masterKey ? [] : [`set ${MASTER_KEY_ENV} in Plesk`]),
+    ...(setup.redirectUri ? [] : ["set GOOGLE_SEARCH_CONSOLE_REDIRECT_URI in Plesk"]),
+    ...(setup.credentials
+      ? []
+      : [keyStoreUsable
+        ? "save the Google client ID and secret under API keys below"
+        : "set GOOGLE_SEARCH_CONSOLE_CLIENT_ID and GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET in Plesk"])
+  ];
+  return missing.join(", then ");
+}
+
 function connectHref(product: GoogleIntegrationProduct) {
   return `/api/integrations/google/start?product=${product}`;
 }
@@ -284,9 +397,10 @@ function connectHref(product: GoogleIntegrationProduct) {
 async function getSettingsData() {
   try {
     const weekAgo = sevenDaysAgo();
-    const [budget, heartbeat, failedRuns, auditLogs, connections, managedUsers] = await Promise.all([
+    const [budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers] = await Promise.all([
       getDataForSeoBudgetSummary(),
       prisma.workerHeartbeat.findUnique({ where: { key: "rank-worker" } }),
+      prisma.workerHeartbeat.findUnique({ where: { key: BACKUP_HEARTBEAT_KEY } }),
       prisma.rankRun.count({ where: { status: { in: ["failed", "blocked"] }, createdAt: { gte: weekAgo } } }),
       prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
       prisma.googleConnection.findMany({
@@ -295,11 +409,12 @@ async function getSettingsData() {
       }),
       prisma.userAccess.count({ where: { enabled: true } })
     ]);
-    return { budget, heartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable: false };
+    return { budget, heartbeat, backupHeartbeat, failedRuns, auditLogs, connections, managedUsers, dbUnavailable: false };
   } catch {
     return {
       budget: { limitUsd: 0, spentUsd: 0, reservedUsd: 0, availableUsd: 0 },
       heartbeat: null,
+      backupHeartbeat: null,
       failedRuns: 0,
       auditLogs: [],
       connections: [] as GoogleConnectionRow[],

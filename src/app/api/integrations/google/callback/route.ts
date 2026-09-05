@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentActor } from "@/lib/access";
 import { writeRequestAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { encryptGscToken } from "@/lib/gsc-crypto";
+import { encryptSecret } from "@/lib/secret-crypto";
 import {
   droppedIntegrationProducts,
   exchangeGoogleAuthorizationCode,
@@ -51,13 +51,13 @@ export async function GET(request: NextRequest) {
       where: { accountEmail },
       create: {
         accountEmail,
-        encryptedRefreshToken: encryptGscToken(tokens.refreshToken),
+        encryptedRefreshToken: encryptSecret(tokens.refreshToken),
         grantedScopes: tokens.grantedScopes,
         connectedByEmail: actor.email,
         lastValidatedAt: new Date()
       },
       update: {
-        encryptedRefreshToken: encryptGscToken(tokens.refreshToken),
+        encryptedRefreshToken: encryptSecret(tokens.refreshToken),
         grantedScopes: tokens.grantedScopes,
         connectedByEmail: actor.email,
         connectedAt: new Date(),

@@ -125,18 +125,21 @@ model UserAccess {
 }
 
 model Client {
-  id              String           @id @default(cuid())
-  name            String
-  notes           String?
-  shareToken      String?          @unique
-  shareEnabled    Boolean          @default(false)
-  shareCreatedAt  DateTime?
-  shareExpiresAt  DateTime?
-  shareRevokedAt  DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  projects        Project[]
-  reportSnapshots ReportSnapshot[]
+  id                  String           @id @default(cuid())
+  name                String
+  notes               String?
+  shareToken          String?          @unique
+  shareEnabled        Boolean          @default(false)
+  shareCreatedAt      DateTime?
+  shareExpiresAt      DateTime?
+  shareRevokedAt      DateTime?
+  /// Views of the always-current client link; reset whenever the link is created or regenerated.
+  shareAccessCount    Int              @default(0)
+  shareLastAccessedAt DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  projects            Project[]
+  reportSnapshots     ReportSnapshot[]
 }
 
 model ReportSnapshot {
@@ -286,6 +289,29 @@ model GoogleConnection {
   ga4Projects           Project[] @relation("ProjectGa4Connection")
 
   @@map("GoogleSearchConsoleConnection")
+}
+
+/// An API credential managed from Settings. The value is a JSON field map encrypted with the
+/// server-held master key; only the fingerprint and a non-secret display hint are ever shown.
+model AppSecret {
+  id                     String    @id @default(cuid())
+  name                   String    @unique
+  encryptedValue         String
+  fingerprint            String
+  displayHint            String
+  version                Int       @default(1)
+  previousEncryptedValue String?
+  previousFingerprint    String?
+  previousDisplayHint    String?
+  previousUpdatedAt      DateTime?
+  /// When the current value was saved or restored; `updatedAt` also moves on verification checks.
+  savedAt                DateTime  @default(now())
+  previousSavedAt        DateTime?
+  updatedByEmail         String
+  lastVerifiedAt         DateTime?
+  lastError              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 }
 
 model Keyword {
@@ -453,19 +479,21 @@ model RateLimitBucket {
 }
 
 model WorkerHeartbeat {
-  key              String    @id
-  status           String    @default("never")
-  startedAt        DateTime?
-  completedAt      DateTime?
-  lastSuccessAt    DateTime?
-  lastFailureAt    DateTime?
-  scheduled        Int       @default(0)
-  submitted        Int       @default(0)
-  collected        Int       @default(0)
-  metricsSubmitted Int       @default(0)
-  metricsCollected Int       @default(0)
-  message          String?
-  updatedAt        DateTime  @updatedAt
+  key                  String    @id
+  status               String    @default("never")
+  startedAt            DateTime?
+  completedAt          DateTime?
+  lastSuccessAt        DateTime?
+  lastFailureAt        DateTime?
+  scheduled            Int       @default(0)
+  submitted            Int       @default(0)
+  collected            Int       @default(0)
+  metricsSubmitted     Int       @default(0)
+  metricsCollected     Int       @default(0)
+  /// Whether the worker's own environment had NOTIFICATIONS_ENABLED on its last run; the app and the worker read different env files.
+  notificationsEnabled Boolean   @default(false)
+  message              String?
+  updatedAt            DateTime  @updatedAt
 }
 
 model RankResult {

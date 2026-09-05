@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 import { currentActor } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { queueKeywordMetrics as enqueueKeywordMetrics } from "@/lib/keyword-metrics";
+import { notifyReportRequest } from "@/lib/notifications";
 import { enqueueProjectRerun, enqueueVerification, retryRankRun } from "@/lib/rank-queue";
 import { executeSandboxRankRun } from "@/lib/rank-runner";
 import { actionRateLimit, paidRunRateLimit } from "@/lib/rate-limit";
@@ -156,6 +158,8 @@ export async function requestReport(formData: FormData) {
     data: { ...data, requestedByEmail: actor.email, requestedByName: actor.name }
   });
   await auditAction("report.requested", actor, "reportRequest", request.id, { clientName: data.clientName });
+  // Email is best-effort and runs after the response, so a slow mail server never holds the form.
+  after(() => notifyReportRequest(request));
   revalidatePath("/");
   revalidatePath("/clients");
   redirect("/clients?requestSent=1");

@@ -95,7 +95,9 @@ export async function enableClientShare(clientId: string, formData?: FormData) {
       shareToken: randomBytes(24).toString("base64url"),
       shareCreatedAt: new Date(),
       shareExpiresAt: expiresAt,
-      shareRevokedAt: null
+      shareRevokedAt: null,
+      shareAccessCount: 0,
+      shareLastAccessedAt: null
     }
   });
   await auditAction("client.share_created", actor, "client", clientId, { expiresAt: expiresAt.toISOString() });
@@ -122,7 +124,9 @@ export async function regenerateClientShare(clientId: string, formData: FormData
       shareToken: randomBytes(24).toString("base64url"),
       shareCreatedAt: new Date(),
       shareExpiresAt: expiresAt,
-      shareRevokedAt: null
+      shareRevokedAt: null,
+      shareAccessCount: 0,
+      shareLastAccessedAt: null
     }
   });
   await auditAction("client.share_regenerated", actor, "client", clientId, { expiresAt: expiresAt.toISOString() });

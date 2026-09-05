@@ -10,6 +10,7 @@ import { EmptyRow, TableWrap } from "@/components/ui/table";
 import { currentActor } from "@/lib/access";
 import { getDataForSeoBudgetSummary } from "@/lib/dataforseo-costs";
 import { prisma } from "@/lib/db";
+import { readableRunError } from "@/lib/run-errors";
 import { formatDate, formatTime, formatUsd, plural, readableDeliveryMethod } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -145,8 +146,3 @@ async function getRunsData(includeBudget: boolean) {
   }
 }
 
-function readableRunError(error: string) {
-  if (error.includes("DATAFORSEO_LOGIN") || error.includes("DATAFORSEO_PASSWORD")) return "DataForSEO credentials were unavailable to the worker.";
-  if (error.includes("DATAFORSEO_LIVE_ENABLED")) return "Paid API requests were disabled when this run started.";
-  return error;
-}

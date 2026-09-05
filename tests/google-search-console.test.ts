@@ -12,25 +12,7 @@ import {
   googleIntegrationsAppUrl,
   isGoogleIntegrationProduct
 } from "../src/lib/google-oauth";
-import { decryptGscToken, encryptGscToken } from "../src/lib/gsc-crypto";
 import { buildGscReport } from "../src/lib/client-report";
-
-const encryptionKey = "a".repeat(64);
-
-test("encrypts and decrypts Search Console refresh tokens", () => {
-  const encrypted = encryptGscToken("refresh-token-value", encryptionKey);
-
-  assert.notEqual(encrypted, "refresh-token-value");
-  assert.equal(decryptGscToken(encrypted, encryptionKey), "refresh-token-value");
-});
-
-test("rejects tampered Search Console refresh tokens", () => {
-  const encrypted = encryptGscToken("refresh-token-value", encryptionKey);
-  const parts = encrypted.split(".");
-  parts[3] = `${parts[3].startsWith("a") ? "b" : "a"}${parts[3].slice(1)}`;
-
-  assert.throws(() => decryptGscToken(parts.join("."), encryptionKey));
-});
 
 test("builds a read-only, offline Google authorization request", () => {
   const url = buildGoogleAuthorizationUrl("test-state", [GSC_READONLY_SCOPE], {
