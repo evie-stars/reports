@@ -70,15 +70,14 @@ The dashboard access panel records successful users automatically, supports dire
 - Sign-ins, sign-outs, report changes, paid queue activity, worker outcomes, share-link changes, and every API key change are stored in the admin audit trail. Key values never appear in it.
 - Database-backed limits protect authenticated mutations, paid reports, share-link changes, Google sign-ins, and the locations API. Limits are configurable with the `RATE_LIMIT_*` environment variables.
 - The rank worker records a heartbeat on every run. The dashboard and Settings page flag stale workers and failed or blocked jobs from the last seven days.
-- Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account.
+- Read-only client links expire, can be regenerated with a new token, and are immediately invalidated when revoked. They remain bearer links and do not require a Google account, so every view is rate limited per caller address in the proxy (`RATE_LIMIT_SHARE_VIEWS_PER_MINUTE`, answered with HTTP 429 and `Retry-After`), counted on the client or snapshot, and recorded in the audit trail with the address.
 
 ## Remaining Security Work
 
 Complete these infrastructure-level items as the reporting integrations expand:
 
-1. Establish dependency-update checks, Plesk patching, tested database backups, and a documented restore procedure.
+1. Establish Plesk patching, tested database backups, and a documented restore procedure. Dependency updates arrive weekly through Dependabot (`.github/dependabot.yml`), grouped for minor and patch bumps, and must pass CI before merging.
 2. Complete a focused application and infrastructure security review before importing broader analytics datasets, such as landing-page or event-level GA4 data.
-3. Rate limit and audit the read-only `/share/*` pages, which are reachable without a Google account.
 
 ## API Keys
 

@@ -235,7 +235,10 @@ export default async function ClientDetailPage({ params, searchParams }: {
             {shareActive && client.shareToken && client.shareExpiresAt ? (
               <div className="space-y-3">
                 <CopyLink path={`/share/${client.shareToken}`} variant="field" className="max-w-2xl" />
-                <p className="text-xs text-slate">Expires {formatDate(client.shareExpiresAt)}</p>
+                <p className="text-xs text-slate">
+                  Expires {formatDate(client.shareExpiresAt)} · {plural(client.shareAccessCount, "view")}
+                  {client.shareLastAccessedAt ? ` · last opened ${formatDate(client.shareLastAccessedAt)}` : " · not opened yet"}
+                </p>
                 <div className="flex flex-col sm:flex-row sm:items-end gap-3">
                   <form action={regenerateShareWithId} className="flex flex-col sm:flex-row sm:items-end gap-2">
                     <ShareExpirySelect />

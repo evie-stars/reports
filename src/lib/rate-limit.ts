@@ -88,6 +88,11 @@ export function shareRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_SHARE_CHANGES_PER_HOUR", 10), windowSeconds: 60 * 60 };
 }
 
+/** Page views of the public /share/* links, per caller address. */
+export function shareViewRateLimit(): RateLimitPolicy {
+  return { limit: configuredPositiveInteger("RATE_LIMIT_SHARE_VIEWS_PER_MINUTE", 60), windowSeconds: 60 };
+}
+
 export function gscImportRateLimit(): RateLimitPolicy {
   return { limit: configuredPositiveInteger("RATE_LIMIT_GSC_IMPORTS_PER_HOUR", 6), windowSeconds: 60 * 60 };
 }

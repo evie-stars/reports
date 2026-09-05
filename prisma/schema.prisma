@@ -125,18 +125,21 @@ model UserAccess {
 }
 
 model Client {
-  id              String           @id @default(cuid())
-  name            String
-  notes           String?
-  shareToken      String?          @unique
-  shareEnabled    Boolean          @default(false)
-  shareCreatedAt  DateTime?
-  shareExpiresAt  DateTime?
-  shareRevokedAt  DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  projects        Project[]
-  reportSnapshots ReportSnapshot[]
+  id                  String           @id @default(cuid())
+  name                String
+  notes               String?
+  shareToken          String?          @unique
+  shareEnabled        Boolean          @default(false)
+  shareCreatedAt      DateTime?
+  shareExpiresAt      DateTime?
+  shareRevokedAt      DateTime?
+  /// Views of the always-current client link; reset whenever the link is created or regenerated.
+  shareAccessCount    Int              @default(0)
+  shareLastAccessedAt DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  projects            Project[]
+  reportSnapshots     ReportSnapshot[]
 }
 
 model ReportSnapshot {
